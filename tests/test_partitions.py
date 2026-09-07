@@ -111,3 +111,94 @@ async def test_drop_defaults_to_dry_run(owner_conn):
         assert spec.name not in await existing_partitions(owner_conn, "events")
     finally:
         await owner_conn.execute(f"DROP TABLE IF EXISTS {spec.name}")
+
+
+async def test_a_utc_day_lands_entirely_in_its_own_partition(owner_conn):
+    """A partition must hold the day it is named for, everywhere.
+
+    Regression test for a bug the calendar found rather than the suite: a bare
+    date literal in a partition bound on a timestamptz column is resolved in the
+    *session* time zone of whoever ran the DDL. Created from a machine set to
+    Asia/Kolkata, every partition covered 18:30 UTC to 18:30 UTC — five and a
+    half hours off its own name. Retention would have dropped the wrong slice of
+    data, and partitions made by CI would not have matched partitions made by a
+    developer.
+
+    Asserted behaviourally rather than by reading the bound's text: Postgres
+    renders that text in the reader's own time zone, so a string comparison
+    would test rendering rather than semantics. Both edges of a UTC day must
+    route to the same partition, and the session is deliberately set to a
+    non-UTC zone to prove the routing does not depend on it.
+    """
+    import datetime as dt
+
+    from mmp_core.ids import uuid7
+    from mmp_db.maintenance import ensure_partitions
+
+    await ensure_partitions(owner_conn, lead_days=1)
+    await owner_conn.execute("SET TIME ZONE 'Asia/Kolkata'")
+    try:
+        day = dt.datetime.now(dt.UTC).date()
+        expected = f"events_{day:%Y%m%d}"
+        app_id, org_id = uuid7(), uuid7()
+
+        edges = {
+            "start of day": dt.datetime.combine(day, dt.time(0, 0, 1), tzinfo=dt.UTC),
+            "end of day": dt.datetime.combine(day, dt.time(23, 59, 59), tzinfo=dt.UTC),
+        }
+        written: list[object] = []
+        for label, moment in edges.items():
+            event_id = uuid7()
+            written.append(event_id)
+            await owner_conn.execute(
+                """INSERT INTO events (event_id, received_at, occurred_at,
+                                       organization_id, app_id, event_name, anonymous_id)
+                   VALUES ($1, $2, $2, $3, $4, 'install', 'anon-tz')""",
+                event_id,
+                moment,
+                org_id,
+                app_id,
+            )
+            partition = await owner_conn.fetchval(
+                "SELECT tableoid::regclass::text FROM events WHERE event_id = $1", event_id
+            )
+            assert partition == expected, (
+                f"{label} ({moment.isoformat()}) landed in {partition}, not {expected}"
+            )
+
+        for event_id in written:
+            await owner_conn.execute("DELETE FROM events WHERE event_id = $1", event_id)
+    finally:
+        await owner_conn.execute("SET TIME ZONE 'UTC'")
+
+
+async def test_midnight_utc_event_lands_in_the_named_partition(owner_conn):
+    """The concrete consequence: a row at 00:05 UTC belongs to that UTC day."""
+    import datetime as dt
+
+    from mmp_core.ids import uuid7
+    from mmp_db.maintenance import ensure_partitions
+
+    await ensure_partitions(owner_conn, lead_days=1)
+    today = dt.datetime.now(dt.UTC).date()
+    just_after_midnight = dt.datetime.combine(today, dt.time(0, 5), tzinfo=dt.UTC)
+    event_id, app_id, org_id = uuid7(), uuid7(), uuid7()
+
+    await owner_conn.execute(
+        """INSERT INTO events (event_id, received_at, occurred_at, organization_id,
+                               app_id, event_name, anonymous_id)
+           VALUES ($1, $2, $2, $3, $4, 'install', 'anon-tz')""",
+        event_id,
+        just_after_midnight,
+        org_id,
+        app_id,
+    )
+    try:
+        partition = await owner_conn.fetchval(
+            "SELECT tableoid::regclass::text FROM events WHERE event_id = $1", event_id
+        )
+        assert partition == f"events_{today:%Y%m%d}", (
+            "an event at 00:05 UTC must land in that UTC day's partition"
+        )
+    finally:
+        await owner_conn.execute("DELETE FROM events WHERE event_id = $1", event_id)

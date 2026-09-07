@@ -1284,8 +1284,10 @@ source = { editable = "services/tracker" }
 dependencies = [
     { name = "mmp-core" },
     { name = "mmp-crypto" },
+    { name = "mmp-db" },
     { name = "mmp-ingest" },
     { name = "msgspec" },
+    { name = "redis", extra = ["hiredis"] },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1294,8 +1296,10 @@ dependencies = [
 requires-dist = [
     { name = "mmp-core", editable = "packages/mmp_core" },
     { name = "mmp-crypto", editable = "packages/mmp_crypto" },
+    { name = "mmp-db", editable = "packages/mmp_db" },
     { name = "mmp-ingest", editable = "packages/mmp_ingest" },
     { name = "msgspec", specifier = ">=0.20" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=5.2,<6" },
     { name = "starlette", specifier = ">=0.49" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38" },
 ]
@@ -1334,6 +1338,8 @@ dependencies = [
     { name = "mmp-db" },
     { name = "mmp-ingest" },
     { name = "mmp-providers" },
+    { name = "msgspec" },
+    { name = "redis", extra = ["hiredis"] },
 ]
 
 [package.metadata]
@@ -1346,6 +1352,8 @@ requires-dist = [
     { name = "mmp-db", editable = "packages/mmp_db" },
     { name = "mmp-ingest", editable = "packages/mmp_ingest" },
     { name = "mmp-providers", editable = "packages/mmp_providers" },
+    { name = "msgspec", specifier = ">=0.20" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=5.2,<6" },
 ]
 
 [[package]]

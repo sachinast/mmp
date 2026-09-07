@@ -7,6 +7,7 @@ from mmp_core.context import (
     new_id,
     request_id_var,
 )
+from mmp_core.gc_tuning import tune_for_latency
 from mmp_core.health import HealthRegistry, health_routes
 from mmp_core.ids import timestamp_ms, uuid7
 from mmp_core.lifecycle import service_lifespan
@@ -34,6 +35,7 @@ __all__ = [
     "request_id_var",
     "service_lifespan",
     "timestamp_ms",
+    "tune_for_latency",
     "unhandled_exception_handler",
     "uuid7",
 ]

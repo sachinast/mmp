@@ -64,7 +64,11 @@ select = [
 ignore = ["S101"]  # assert is fine in tests; pytest needs it
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S105", "S106"]
+"**/tests/**" = ["S105", "S106", "SIM117"]
+# Load-testing harness: it deliberately spawns a server subprocess and touches
+# the filesystem from async code. Neither is a concern in a developer tool that
+# never runs in production.
+"infra/load/*.py" = ["ASYNC109", "ASYNC220", "ASYNC240", "S110"]
 
 # The single most important lint rule in this repo: no f-string SQL, ever.
 [tool.ruff.lint.flake8-bandit]

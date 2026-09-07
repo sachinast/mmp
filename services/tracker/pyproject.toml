@@ -2,7 +2,7 @@
 name = "mmp-tracker"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["starlette>=0.49", "uvicorn[standard]>=0.38", "msgspec>=0.20", "mmp-core", "mmp-crypto", "mmp-ingest"]
+dependencies = ["starlette>=0.49", "uvicorn[standard]>=0.38", "msgspec>=0.20", "mmp-core", "mmp-crypto", "mmp-ingest", "mmp-db", "redis[hiredis]>=5.2,<6"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }

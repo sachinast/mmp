@@ -2,7 +2,7 @@
 name = "mmp-worker"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["arq>=0.27", "httpx>=0.28", "mmp-core", "mmp-db", "mmp-ingest", "mmp-attrib", "mmp-providers", "mmp-crypto"]
+dependencies = ["arq>=0.27", "httpx>=0.28", "redis[hiredis]>=5.2,<6", "msgspec>=0.20", "mmp-core", "mmp-db", "mmp-ingest", "mmp-attrib", "mmp-providers", "mmp-crypto"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }

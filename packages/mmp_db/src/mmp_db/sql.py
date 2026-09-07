@@ -63,6 +63,56 @@ def select(table: str, names: Sequence[str], *, where: str = "", suffix: str = "
     return statement
 
 
+def count_rows(table: str) -> str:
+    """An exact row count for one table.
+
+    Exact rather than ``reltuples``: the caller is a migration guard deciding
+    whether it is safe to drop a partition, and an estimate that reads zero for
+    a table holding data is the one wrong answer that matters.
+    """
+    # sql-identifier-ok: see module docstring.
+    return f"SELECT count(*) FROM {identifier(table)}"  # noqa: S608 # nosec B608
+
+
+def drop_table(table: str, *, if_exists: bool = True) -> str:
+    clause = "IF EXISTS " if if_exists else ""
+    return f"DROP TABLE {clause}{identifier(table)}"
+
+
+def truncate(table: str) -> str:
+    # sql-identifier-ok: see module docstring.
+    return f"TRUNCATE {identifier(table)}"
+
+
+def create_temp_like(table: str, *, like: str) -> str:
+    """A temporary table with the same shape as an existing one.
+
+    Used by the ingest writer for its staging table, which must track the events
+    table's columns exactly — ``LIKE`` keeps them in step without a second
+    definition to drift.
+    """
+    # sql-identifier-ok: see module docstring.
+    return (
+        f"CREATE TEMP TABLE IF NOT EXISTS {identifier(table)} "
+        f"(LIKE {identifier(like)} INCLUDING DEFAULTS) ON COMMIT PRESERVE ROWS"
+    )
+
+
+def insert_select(target: str, source: str, names: Sequence[str], *, on_conflict: str = "") -> str:
+    """``INSERT INTO target (cols) SELECT cols FROM source``.
+
+    The same validated column list is used on both sides, so the projection
+    cannot drift out of order — a mismatch there would silently write each
+    value into the wrong column.
+    """
+    projection = columns(names)
+    into = identifier(target)
+    frm = identifier(source)
+    # sql-identifier-ok: see module docstring.
+    statement = f"INSERT INTO {into} ({projection}) SELECT {projection} FROM {frm}"  # noqa: S608 # nosec B608
+    return f"{statement} {on_conflict}" if on_conflict else statement
+
+
 def with_returning(statement: str, names: Sequence[str]) -> str:
     """Append a validated RETURNING clause to a literal statement.
 

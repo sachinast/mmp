@@ -66,6 +66,39 @@ def enable_rls_sql(table: str) -> list[str]:
     ]
 
 
+# The tracker's chicken-and-egg problem.
+#
+# Authentication happens *before* the tenant is known: the whole point of
+# presenting an API key is to discover which organisation the caller is. So the
+# tracker cannot set mmp.org_id first, and the org_isolation policy would return
+# it zero rows on every request.
+#
+# The resolution is a narrow, named, read-only policy on exactly the three
+# tables the tracker must consult pre-authentication. Combined with the GRANTs —
+# mmp_tracker holds SELECT on only these tables and INSERT on only the two event
+# tables — the blast radius is: it can read credential rows (which contain
+# hashes, not keys) and tracking links, and it can write events. It cannot read
+# a campaign, a user, a postback rule, or a partner credential, and it cannot
+# UPDATE or DELETE anything at all.
+TRACKER_LOOKUP_TABLES = ("api_keys", "apps", "tracking_links")
+
+
+def tracker_lookup_sql(table: str) -> list[str]:
+    # sql-identifier-ok: table names come from the constant above.
+    return [
+        f"""
+        CREATE POLICY tracker_lookup ON {table}
+            FOR SELECT TO mmp_tracker
+            USING (true)
+        """
+    ]
+
+
+def drop_tracker_lookup_sql(table: str) -> list[str]:
+    # sql-identifier-ok: as above.
+    return [f"DROP POLICY IF EXISTS tracker_lookup ON {table}"]
+
+
 def disable_rls_sql(table: str) -> list[str]:
     # sql-identifier-ok: see above.
     return [
@@ -106,6 +139,15 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Every service reasons in UTC. Left to the server default, date_trunc and any
+-- bare date literal would follow whatever time zone the cluster happens to be
+-- set to — which is how partition boundaries ended up five and a half hours off
+-- the days they were named for.
+ALTER ROLE mmp_api      SET timezone = 'UTC';
+ALTER ROLE mmp_tracker  SET timezone = 'UTC';
+ALTER ROLE mmp_worker   SET timezone = 'UTC';
+ALTER ROLE mmp_readonly SET timezone = 'UTC';
 
 ALTER ROLE mmp_tracker SET statement_timeout = '2s';
 ALTER ROLE mmp_api     SET statement_timeout = '15s';

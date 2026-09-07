@@ -1,43 +1,98 @@
 """Worker entrypoint.
 
-Two kinds of background work live here and they are kept apart on purpose:
-
-* **Stream consumers** (Phase 3+) read Redis Streams consumer groups and write
-  batches to Postgres. They are throughput work, and they ack after commit.
-* **arq jobs** (Phase 9+) are outbound IO — postbacks, webhooks — where the
-  retry schedule and per-job state matter more than throughput.
-
-Phase 0 runs neither. It proves the process starts, exposes a health port, and
-exits cleanly on SIGTERM.
+Runs the stream consumer alongside the scheduled jobs, under one supervisor with
+one shutdown path. SIGTERM stops the consumer, which finishes its current batch,
+drains what is already queued, and exits — so a deploy costs latency rather than
+events.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import signal
+import socket
+from collections.abc import Awaitable, Callable
 
-from mmp_core import HealthRegistry, configure_logging, get_logger, load_settings
+from mmp_core.settings import Settings
+from mmp_db.pool import Database
+from redis.asyncio import Redis
+
+from mmp_core import configure_logging, get_logger, load_settings
+from mmp_worker.consumers import EventConsumer
+from mmp_worker.jobs import maintain_partitions, refresh_usage
 
 log = get_logger(__name__)
 
+PARTITION_INTERVAL = 3600.0
+USAGE_INTERVAL = 60.0
 
-async def run() -> None:
-    settings = load_settings(service_name="worker")
+
+def consumer_name() -> str:
+    """Stable per process, unique per instance.
+
+    Redis tracks pending messages per consumer name. A name that changes on
+    every restart would orphan the previous instance's pending entries, leaving
+    them to be reclaimed only by the stalled-message sweep.
+    """
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+async def _every(
+    interval: float, task: Callable[[], Awaitable[object]], *, name: str, stop: asyncio.Event
+) -> None:
+    while not stop.is_set():
+        try:
+            await task()
+        except Exception:
+            log.exception("scheduled_job_failed", job=name)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+
+
+async def run(settings: Settings | None = None) -> None:
+    settings = settings or load_settings(service_name="worker")
     configure_logging(service="worker", level=settings.log_level, json_output=settings.log_json)
-    registry = HealthRegistry(service="worker", version=settings.version)
+
+    database = await Database.connect(settings, role="mmp_worker")
+    redis = Redis.from_url(str(settings.redis_url), decode_responses=False)
+    consumer = EventConsumer(redis=redis, database=database, consumer_name=consumer_name())
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
 
-    log.info("worker_started", version=settings.version)
-    await stop.wait()
+    # Ensure today's partitions exist before the first write, not on the first
+    # failure.
+    await maintain_partitions(database)
 
-    registry.start_draining()
-    log.info("worker_draining")
-    # Phase 3 drains in-flight batches here before returning.
-    log.info("worker_stopped")
+    log.info("worker_started", consumer=consumer_name(), version=settings.version)
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(consumer.run(), name="event-consumer")
+        tasks.create_task(
+            _every(
+                PARTITION_INTERVAL,
+                lambda: maintain_partitions(database),
+                name="partitions",
+                stop=stop,
+            ),
+            name="partition-maintenance",
+        )
+        tasks.create_task(
+            _every(USAGE_INTERVAL, lambda: refresh_usage(database), name="usage", stop=stop),
+            name="usage-rollup",
+        )
+
+        await stop.wait()
+        log.info("worker_draining")
+        await consumer.stop()
+
+    await redis.aclose()
+    await database.close()
+    log.info("worker_stopped", **consumer.metrics.as_dict())
 
 
 def main() -> None:

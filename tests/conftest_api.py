@@ -17,6 +17,19 @@ from tests.conftest_db import owner_dsn, role_dsn
 TEST_REDIS_URL = os.environ.get("MMP_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 
 
+def build_settings_for(role: str) -> Settings:
+    """Settings whose DSN connects as one specific application role.
+
+    Which role a service connects as is a security property, not a detail:
+    mmp_tracker can read three tables and insert into two, while mmp_api is
+    subject to tenant isolation on everything. Tests that connect as the wrong
+    role prove nothing about the real deployment.
+    """
+    settings = build_api_settings()
+    dsn = role_dsn(role).replace("postgresql://", "postgresql+asyncpg://")
+    return settings.model_copy(update={"database_url": dsn, "service_name": role})
+
+
 def build_api_settings() -> Settings:
     # Connect as mmp_api, the role the service actually uses in production.
     #

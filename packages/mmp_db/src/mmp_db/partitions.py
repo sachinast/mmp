@@ -13,6 +13,15 @@ Index policy on these tables is austere on purpose: every index is paid for on
 every insert, and the ingest path is the thing we are protecting. Each index
 below exists because a specific query in the attribution or analytics path
 needs it, not because a column looked queryable.
+
+**Boundaries are explicitly UTC.** A bare date literal in a partition bound on a
+``timestamptz`` column is resolved using the *session* time zone of whoever runs
+the DDL. The first version of this module emitted bare dates, and on a machine
+set to Asia/Kolkata every partition ended up covering 18:30 UTC to 18:30 UTC —
+shifted five and a half hours from the day in its own name. Two consequences,
+both quiet: retention would drop the wrong slice of data, and partitions created
+from a laptop would not line up with partitions created by CI. The bounds carry
+``+00`` so the day a partition is named for is the day it holds, everywhere.
 """
 
 from __future__ import annotations
@@ -141,7 +150,8 @@ def create_partition_sql(spec: PartitionSpec) -> list[str]:
         # sql-identifier-ok: table name from a module constant, dates from
         # datetime. No caller-supplied value reaches this string.
         f"CREATE TABLE IF NOT EXISTS {spec.name} PARTITION OF {spec.table} "
-        f"FOR VALUES FROM ('{spec.start:%Y-%m-%d}') TO ('{spec.end:%Y-%m-%d}')"
+        f"FOR VALUES FROM ('{spec.start:%Y-%m-%d} 00:00:00+00') "
+        f"TO ('{spec.end:%Y-%m-%d} 00:00:00+00')"
     ]
     statements.extend(template.format(name=spec.name) for template in PARTITION_INDEXES[spec.table])
     return statements

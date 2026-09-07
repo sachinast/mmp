@@ -82,3 +82,13 @@ migration: ## Autogenerate a migration: make migration m="add widgets"
 dev-roles: ## Give the application roles a login for local development
 	psql -d mmp_dev -f infra/scripts/bootstrap_dev_roles.sql
 	psql -d mmp_test -f infra/scripts/bootstrap_dev_roles.sql
+
+# ---------------------------------------------------------------- load
+.PHONY: bench bench-baseline
+
+bench: ## Latency regression gate against the recorded baseline
+	$(PY) python infra/load/ingest_benchmark.py --requests 800 --batch 20 --concurrency 8
+
+bench-baseline: ## Re-record the latency baseline
+	$(PY) python infra/load/ingest_benchmark.py --requests 800 --batch 20 \
+	  --concurrency 8 --update-baseline

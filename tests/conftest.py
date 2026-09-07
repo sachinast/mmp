@@ -12,4 +12,4 @@ for var in ("MMP_API_KEY_PEPPER", "MMP_IP_HASH_PEPPER", "MMP_SESSION_SECRET"):
 
 
 # Database fixtures live in their own module for readability.
-pytest_plugins = ["tests.conftest_db", "tests.conftest_api"]
+pytest_plugins = ["tests.conftest_db", "tests.conftest_api", "tests.conftest_ingest"]

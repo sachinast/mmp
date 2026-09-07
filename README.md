@@ -46,7 +46,14 @@ it receive traffic — runs dependency probes, reports draining during shutdown)
 make check     # lint + types + security + tests, exactly what CI runs
 make fmt       # autofix
 make audit     # dependency CVE scan against the lockfile
+make bench     # ingest latency regression gate
 ```
+
+`make bench` compares service latency against `infra/load/baseline.json`. It is
+a **regression gate, not an SLO check** — it runs a Python load generator against
+a Python server on the same cores and is itself the bottleneck. Capacity and the
+published p99 < 120 ms SLO are measured with `infra/load/ingest.k6.js` against
+deployed infrastructure.
 
 ## Credentials
 
@@ -56,6 +63,31 @@ make audit     # dependency CVE scan against the lockfile
 | API key | HMAC-SHA256 under a KMS pepper | Verified on **every ingest request**. A slow hash here would be a self-inflicted denial of service; 256 bits of entropy does the work instead. |
 | Partner credentials | AES-256-GCM, KMS-wrapped DEK | Must be recoverable. Bound to the owning organisation, so a row copied to another tenant fails to decrypt. |
 | Session | Opaque token in Redis | Revocable. A JWT would make logout a lie. |
+
+## How an event becomes a row
+
+```
+POST /v1/events  ->  authenticate (Redis-cached key record, HMAC compare)
+                 ->  size + decompression caps, msgspec validation
+                 ->  stamp received_at at the edge
+                 ->  Redis idempotency window (catches SDK retries)
+                 ->  append to a bounded in-process buffer, return 202
+                        |
+                        v  background, every 50 ms or 500 events
+                 ->  Redis Stream (consumer group, replayable)
+                        |
+                        v  worker
+                 ->  COPY into a TEMP staging table
+                 ->  INSERT ... SELECT ... ON CONFLICT DO NOTHING
+                 ->  acknowledge  <- only now
+```
+
+Two deduplication layers, because there are two different failures:
+
+| Failure | Caught by | Guarantee |
+| --- | --- | --- |
+| Stream redelivery (worker crashed before ack) | Primary key `(received_at, app_id, event_id)` — `received_at` is stamped at the edge and carried in the message, so a redelivery reproduces the exact key | Exact |
+| SDK retry after a lost 202 (new request, new `received_at`) | Redis idempotency window on `(app_id, event_id)` | Best effort over a bounded window; residual measured by reconciliation |
 
 ## Data model
 
@@ -115,7 +147,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 0** — foundation, observability, quality gates, versioning policy
 - [x] **Phase 1** — schema, partitioning, RLS and tenancy
 - [x] **Phase 2** — auth, organisations, apps, API keys
-- [ ] Phase 3 — ingest pipeline end to end
+- [x] **Phase 3** — ingest pipeline end to end
 - [ ] Phase 4 — campaigns, links, click tracking
 - [ ] Phase 5 — attribution and Play Install Referrer
 - [ ] Phase 6 — sessions, rollups, analytics API

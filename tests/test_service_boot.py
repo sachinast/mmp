@@ -6,16 +6,21 @@ from mmp_api.app import create_app as create_api
 from mmp_tracker.app import create_app as create_tracker
 from mmp_web.app import create_app as create_web
 
-from tests.conftest_api import build_api_settings
+from tests.conftest_api import build_settings_for
 
 
 def _create_api():
-    # The API opens a real connection pool at startup, so it needs the test
-    # database rather than the placeholder DSN the other two never dial.
-    return create_api(build_api_settings())
+    # The API and the tracker open real connection pools at startup, so they
+    # need the test database — and each must connect as the role it uses in
+    # production, since their grants and RLS policies differ.
+    return create_api(build_settings_for("mmp_api"))
 
 
-SERVICES = [("tracker", create_tracker), ("api", _create_api), ("web", create_web)]
+def _create_tracker():
+    return create_tracker(build_settings_for("mmp_tracker"))
+
+
+SERVICES = [("tracker", _create_tracker), ("api", _create_api), ("web", create_web)]
 
 
 @pytest.mark.parametrize(("name", "factory"), SERVICES, ids=[n for n, _ in SERVICES])
@@ -50,7 +55,7 @@ async def test_request_id_and_security_headers(name, factory):
 
 async def test_incoming_correlation_id_is_adopted():
     """A correlation ID from upstream must survive, so a trace stays one trace."""
-    app = create_tracker()
+    app = _create_tracker()
     transport = httpx.ASGITransport(app=app)
     async with (
         app.router.lifespan_context(app),
