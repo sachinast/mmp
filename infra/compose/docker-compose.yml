@@ -1,0 +1,49 @@
+# Data stores for local development.
+#
+# The four application services run natively via `make tracker` / `api` / etc.
+# so that reload is instant; only the stateful dependencies are containerised.
+# Production images are built in Phase 10 alongside the deployment checklist.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mmp
+      POSTGRES_PASSWORD: mmp_dev_only
+      POSTGRES_DB: mmp_dev
+    command:
+      # Settings the ingest path depends on, matched to production intent.
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - synchronous_commit=off   # dev only — batched ingest is durable enough here
+      - -c
+      - log_min_duration_statement=250ms
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmp -d mmp_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    # noeviction is deliberate: the ingest stream must never lose messages to an
+    # eviction policy quietly dropping keys under memory pressure.
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

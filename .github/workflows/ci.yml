@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+env:
+  MMP_ENVIRONMENT: dev
+  MMP_SHUTDOWN_GRACE_SECONDS: "0"
+  MMP_DATABASE_URL: postgresql+asyncpg://mmp:mmp@127.0.0.1:5432/mmp_test
+  MMP_REDIS_URL: redis://127.0.0.1:6379/1
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mmp
+          POSTGRES_PASSWORD: mmp
+          POSTGRES_DB: mmp_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mmp" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+
+      - name: Generate ephemeral test secrets
+        run: |
+          {
+            echo "MMP_API_KEY_PEPPER=$(openssl rand -hex 32)"
+            echo "MMP_IP_HASH_PEPPER=$(openssl rand -hex 32)"
+            echo "MMP_SESSION_SECRET=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Types
+        run: uv run mypy packages services
+
+      - name: Static security scan
+        run: uv run bandit -q -r packages services
+
+      - name: Dependency audit
+        run: |
+          uv export --no-emit-workspace --no-dev --format requirements-txt -q -o audit-requirements.txt
+          uv run pip-audit -r audit-requirements.txt --strict
+
+      - name: Tests
+        run: uv run pytest

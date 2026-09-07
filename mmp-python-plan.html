@@ -1,0 +1,820 @@
+<title>MMP on Python and Postgres</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:      #f5f6f3;
+    --surface:    #ffffff;
+    --surface-2:  #eceee8;
+    --ink:        #10161a;
+    --muted:      #59656d;
+    --line:       #dce0d9;
+    --line-soft:  #e7eae3;
+    --signal:     #0b6e62;
+    --signal-dim: #d8e8e4;
+    --flag:       #a32552;
+    --flag-dim:   #f6e2e8;
+    --warn:       #8a6100;
+    --warn-dim:   #f6ecd6;
+    --ok:         #2c6b3f;
+    --ok-dim:     #dfeddf;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --measure: 68ch;
+    --wide: 1140px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0c1113;
+      --surface:    #141b1d;
+      --surface-2:  #1b2426;
+      --ink:        #e3e9e6;
+      --muted:      #8b9995;
+      --line:       #26312f;
+      --line-soft:  #1e2827;
+      --signal:     #4fd1be;
+      --signal-dim: #123330;
+      --flag:       #f2799a;
+      --flag-dim:   #33131f;
+      --warn:       #e0b44c;
+      --warn-dim:   #2e2412;
+      --ok:         #6fcf8f;
+      --ok-dim:     #14291c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0c1113;
+    --surface:    #141b1d;
+    --surface-2:  #1b2426;
+    --ink:        #e3e9e6;
+    --muted:      #8b9995;
+    --line:       #26312f;
+    --line-soft:  #1e2827;
+    --signal:     #4fd1be;
+    --signal-dim: #123330;
+    --flag:       #f2799a;
+    --flag-dim:   #33131f;
+    --warn:       #e0b44c;
+    --warn-dim:   #2e2412;
+    --ok:         #6fcf8f;
+    --ok-dim:     #14291c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: var(--wide); margin: 0 auto; padding: 0 28px 96px; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    padding: 64px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    display: grid;
+    gap: 20px;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--signal);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(34px, 5.4vw, 60px);
+    line-height: 1.03;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+    margin: 0;
+  }
+  .standfirst {
+    font-size: clamp(18px, 2.2vw, 21px);
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .factbar {
+    display: flex; flex-wrap: wrap; gap: 0 32px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+    color: var(--muted); padding-top: 8px;
+  }
+  .factbar b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+  section { padding: 56px 0 8px; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: none; }
+
+  .sec-head { display: grid; gap: 10px; margin-bottom: 28px; }
+  .sec-head .eyebrow {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+  }
+  h2 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(25px, 3.4vw, 36px); line-height: 1.12;
+    letter-spacing: -0.018em; margin: 0; text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--display); font-weight: 600; font-size: 19px;
+    letter-spacing: -0.01em; margin: 34px 0 10px; line-height: 1.3;
+  }
+  h4 {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 12px;
+  }
+  p { margin: 0 0 16px; max-width: var(--measure); }
+  ul, ol { max-width: var(--measure); margin: 0 0 16px; padding-left: 22px; display: grid; gap: 7px; }
+  li::marker { color: var(--signal); }
+  a { color: var(--signal); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  em.term { font-style: normal; font-family: var(--mono); font-size: .88em; color: var(--ink); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+
+  code {
+    font-family: var(--mono); font-size: .85em;
+    background: var(--surface-2); padding: 1.5px 5px; border-radius: 3px;
+    color: var(--ink);
+  }
+
+  pre {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--signal);
+    border-radius: 4px; padding: 18px 20px; margin: 18px 0 24px;
+    overflow-x: auto; color: var(--ink);
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--signal); font-weight: 600; }
+
+  /* ---------- tables ---------- */
+  .tw { overflow-x: auto; margin: 20px 0 28px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--display); font-size: 14px; font-variant-numeric: tabular-nums; }
+  thead th {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: var(--surface-2); white-space: nowrap;
+  }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; line-height: 1.5; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-family: var(--mono); font-size: 12.5px; }
+  td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border: 1px solid var(--line); border-left: 3px solid var(--muted);
+    background: var(--surface); border-radius: 4px;
+    padding: 18px 20px; margin: 22px 0; max-width: var(--measure);
+  }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+  .note.risk { border-left-color: var(--flag); background: var(--flag-dim); }
+  .note.warn { border-left-color: var(--warn); background: var(--warn-dim); }
+  .note.good { border-left-color: var(--ok); background: var(--ok-dim); }
+  .note h4 { color: var(--ink); }
+  .note.risk h4 { color: var(--flag); }
+  .note.warn h4 { color: var(--warn); }
+  .note.good h4 { color: var(--ok); }
+
+  /* ---------- pills ---------- */
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px;
+    font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .p-sig  { background: var(--signal-dim); color: var(--signal); border-color: var(--signal); }
+  .p-flag { background: var(--flag-dim); color: var(--flag); border-color: var(--flag); }
+  .p-warn { background: var(--warn-dim); color: var(--warn); border-color: var(--warn); }
+  .p-ok   { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); }
+  .p-mute { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+
+  /* ---------- grids ---------- */
+  .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 22px 0 28px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 20px; }
+  .card h4 { margin-bottom: 8px; }
+  .card p { font-size: 15px; margin: 0; color: var(--muted); max-width: none; }
+  .card p + p { margin-top: 10px; }
+  .card .big { font-family: var(--mono); font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.1; display: block; margin-bottom: 6px; }
+
+  /* ---------- latency ladder ---------- */
+  .ladder { margin: 24px 0 8px; display: grid; gap: 3px; }
+  .rung { display: grid; grid-template-columns: minmax(150px, 210px) 1fr 62px; gap: 14px; align-items: center; font-size: 13px; }
+  .rung .lbl { font-family: var(--display); font-weight: 500; }
+  .rung .bar { height: 15px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+  .rung .bar span { display: block; height: 100%; background: var(--signal); }
+  .rung .bar span.net { background: var(--muted); }
+  .rung .ms { font-family: var(--mono); font-size: 12px; text-align: right; color: var(--muted); }
+  .rung.total { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .rung.total .lbl, .rung.total .ms { font-weight: 600; color: var(--ink); }
+
+  /* ---------- pipeline ---------- */
+  .flow { display: grid; gap: 10px; margin: 22px 0 28px; }
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 16px; align-items: start; }
+  .step .n {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--signal);
+    border: 1px solid var(--line); border-radius: 3px; background: var(--surface);
+    height: 26px; display: grid; place-items: center; margin-top: 2px;
+  }
+  .step .body { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 13px 16px; }
+  .step .body b { font-family: var(--display); font-weight: 600; font-size: 15px; display: block; margin-bottom: 3px; }
+  .step .body span { font-size: 14px; color: var(--muted); }
+
+  /* ---------- phases ---------- */
+  .phase { display: grid; grid-template-columns: 62px 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line-soft); align-items: start; }
+  .phase:last-child { border-bottom: none; }
+  .phase .ph {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    color: var(--muted); padding-top: 3px;
+  }
+  .phase .ph b { display: block; font-size: 22px; color: var(--signal); letter-spacing: -0.02em; }
+  .phase h3 { margin: 0 0 6px; font-size: 17px; }
+  .phase p { font-size: 14.5px; color: var(--muted); margin: 0 0 8px; max-width: 72ch; }
+  .phase .ships { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .phase .ships b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- toc ---------- */
+  .toc { margin: 40px 0 0; padding: 22px 0 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 26px; }
+  .toc a { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; text-decoration: none; color: var(--muted); padding: 3px 0; display: block; }
+  .toc a:hover, .toc a:focus-visible { color: var(--signal); }
+  .toc a b { color: var(--ink); font-weight: 600; }
+
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 2px; }
+
+  footer {
+    padding: 40px 0 0; margin-top: 46px; border-top: 2px solid var(--ink);
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 6px 28px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .page { padding: 0 18px 64px; }
+    .rung { grid-template-columns: 1fr 52px; }
+    .rung .bar { grid-column: 1 / -1; }
+    .phase { grid-template-columns: 1fr; gap: 8px; }
+    .phase .ph b { display: inline; font-size: 16px; margin-right: 8px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">Build plan · replatform · v2.0</div>
+    <h1>MMP on Python and Postgres</h1>
+    <p class="standfirst">A re-plan of the Mobile Measurement Platform spec onto a Python service tier and a single Postgres system of record — without giving up redirect latency, ingest throughput, or attribution correctness.</p>
+    <div class="factbar">
+      <span>Project <b>MMP (217)</b></span>
+      <span>Supersedes <b>Master Build Spec v1.0</b></span>
+      <span>Phases <b>0–12</b></span>
+      <span>Prepared <b>2026-09-07</b></span>
+    </div>
+    <nav class="toc">
+      <a href="#decisions"><b>Decisions</b> — what changes</a>
+      <a href="#stack"><b>Stack</b> — services and libraries</a>
+      <a href="#data"><b>Data</b> — one Postgres, partitioned</a>
+      <a href="#speed"><b>Speed</b> — the two hot paths</a>
+      <a href="#accuracy"><b>Accuracy</b> — the correctness contract</a>
+      <a href="#security"><b>Security</b> — tenancy, keys, egress</a>
+      <a href="#scale"><b>Scale</b> — capacity and graduation</a>
+      <a href="#phases"><b>Phases</b> — revised build order</a>
+      <a href="#prompts"><b>Prompts</b> — the 34, remapped</a>
+      <a href="#open"><b>Open</b> — decisions I need</a>
+    </nav>
+  </header>
+
+  <!-- ============================================================ -->
+  <section id="decisions">
+    <div class="sec-head">
+      <div class="eyebrow">Decisions</div>
+      <h2>What changes, and what survives intact</h2>
+    </div>
+
+    <p>The v1.0 spec is architecturally sound and most of it carries over unchanged: the separation of a tracking edge from the business API, queue-buffered async ingestion, deterministic last-click attribution, hash-only API keys, and the honest scope split across Tiers A/B/C. Those are language-independent decisions and I am not relitigating them.</p>
+
+    <p>Two things change. Node/Fastify becomes Python, and — the more consequential call — <strong>ClickHouse comes out of the MVP</strong>. Running Postgres <em>and</em> ClickHouse from day one means two schemas, two retention policies, two failure modes, and a permanent consistency question between them, at a volume where one tuned Postgres is not close to breaking a sweat. Postgres with time-partitioned event tables and pre-aggregated rollups carries this product to roughly a billion rows per table before the read path becomes the constraint. The graduation trigger is defined in <a href="#scale">Scale</a>, and the ingest layer is built so that adding a columnar sink later is a new consumer on an existing stream, not a rewrite.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Concern</th><th>Spec v1.0</th><th>This plan</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Language</td><td class="mono">TypeScript / Node</td><td class="mono">Python 3.12 (async)</td><td>Requested. Async Python on uvloop is fast enough for both hot paths when the hot paths do no ORM work.</td></tr>
+          <tr><td>Analytics store</td><td class="mono">ClickHouse</td><td class="mono">Postgres, partitioned</td><td>One system of record. Removes cross-store consistency and a second ops burden from the MVP.</td></tr>
+          <tr><td>Queue</td><td class="mono">BullMQ</td><td class="mono">Redis Streams + arq</td><td>Streams give consumer groups, replay and visible backlog for ingest; arq handles retryable outbound jobs.</td></tr>
+          <tr><td>ORM</td><td class="mono">Drizzle</td><td class="mono">SQLAlchemy 2.0 + raw asyncpg</td><td>ORM for CRUD, raw parameterized SQL and <code>COPY</code> on ingest and analytics.</td></tr>
+          <tr><td>Tenancy enforcement</td><td>Middleware only</td><td>Middleware <em class="term">+</em> Postgres RLS</td><td>Two independent layers; a forgotten <code>WHERE org_id</code> stops being a data breach.</td></tr>
+          <tr><td>Dashboard</td><td class="mono">Next.js</td><td class="mono">FastAPI + Jinja + HTMX</td><td>Keeps the team in one language for the MVP. Swappable — the API is the contract. See <a href="#open">Open decisions</a>.</td></tr>
+          <tr><td>Mobile SDKs</td><td>TS / Kotlin / Swift</td><td class="mono">unchanged</td><td>Not negotiable by language choice. Python does not run in the app.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <h4>The one place Python genuinely costs you</h4>
+      <p>Per-request CPU on the click redirect is higher in Python than in Node, and the GIL means a worker process serves one request's Python bytecode at a time. The answer is architectural, not heroic: the redirect path executes almost no Python (cache read, UUID, one queue append), and you scale by process count — <code>uvicorn</code> workers sized to <code>2 × cores</code> behind the load balancer. Budget for ~2× the instance count Node would need on the tracker tier. At MVP volumes that is one extra small instance, not a design problem.</p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="stack">
+    <div class="sec-head">
+      <div class="eyebrow">Stack</div>
+      <h2>Four services, one language, pinned libraries</h2>
+    </div>
+
+    <p>Same four-service topology as v1.0, because the reason for it is unchanged: ingestion must scale without touching business logic, and a slow dashboard query must never be able to add latency to a redirect.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Service</th><th>Runtime</th><th>Owns</th><th>Scales on</th></tr></thead>
+        <tbody>
+          <tr><td><b>tracker</b></td><td class="mono">Starlette + uvicorn/uvloop</td><td><code>GET /c/{code}</code>, <code>POST /v1/events</code>, <code>POST /v1/s2s/events</code></td><td>Request rate. Stateless, no ORM, no synchronous DB write.</td></tr>
+          <tr><td><b>api</b></td><td class="mono">FastAPI + SQLAlchemy 2.0</td><td>Auth, orgs, apps, keys, campaigns, links, postback rules, analytics reads</td><td>Dashboard users. Separate pool, separate deploy.</td></tr>
+          <tr><td><b>worker</b></td><td class="mono">arq + asyncpg</td><td>Batch persistence, attribution, postbacks, webhooks, rollups</td><td>Backlog depth. Horizontally scaled per consumer group.</td></tr>
+          <tr><td><b>web</b></td><td class="mono">FastAPI + Jinja2 + HTMX</td><td>Dashboard UI, server-rendered</td><td>Rarely. Reads through <b>api</b> only.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Library choices worth defending</h3>
+    <div class="cards">
+      <div class="card">
+        <h4>asyncpg, not psycopg-as-default</h4>
+        <p>Binary protocol, native <code>copy_records_to_table</code>, roughly 3× psycopg2 on bulk paths. SQLAlchemy 2.0 async runs on top of it for the CRUD side, so there is one driver in the process.</p>
+      </div>
+      <div class="card">
+        <h4>Redis Streams for ingest</h4>
+        <p>Consumer groups, acked delivery, replayable history, and a backlog you can actually see. Celery's opaque queue semantics and its pickle serializer are both liabilities here.</p>
+      </div>
+      <div class="card">
+        <h4>arq for outbound jobs</h4>
+        <p>Async-native, small, Redis-backed. Postbacks and webhooks are IO-bound retry-with-backoff work — exactly its shape. No Celery, and therefore no pickle deserialization surface.</p>
+      </div>
+      <div class="card">
+        <h4>orjson + msgspec</h4>
+        <p><code>orjson</code> for serialization, <code>msgspec</code> for validating ingest payloads. Pydantic v2 stays on the business API where developer ergonomics matter more than microseconds.</p>
+      </div>
+      <div class="card">
+        <h4>uv + locked hashes</h4>
+        <p>Dependencies resolved by <code>uv</code> into a hash-pinned lockfile, installed with <code>--require-hashes</code>. <code>pip-audit</code> gates CI. Supply chain is a security control, not a convenience.</p>
+      </div>
+      <div class="card">
+        <h4>PgBouncer, transaction mode</h4>
+        <p>Hundreds of app connections collapse to tens of Postgres backends. Requires <code>statement_cache_size=0</code> on asyncpg pools — a known footgun; encode it in the shared pool factory, not in each service.</p>
+      </div>
+    </div>
+
+<pre><span class="c"># repo layout — one language, uv workspace</span>
+mmp/
+├── services/
+│   ├── tracker/       <span class="c"># Starlette. hot path only. no ORM import anywhere.</span>
+│   ├── api/           <span class="c"># FastAPI + SQLAlchemy. business logic.</span>
+│   ├── worker/        <span class="c"># arq tasks + stream consumers</span>
+│   └── web/           <span class="c"># Jinja/HTMX dashboard</span>
+├── packages/
+│   ├── mmp_db/        <span class="c"># SQLAlchemy models, Alembic migrations, RLS policies</span>
+│   ├── mmp_ingest/    <span class="c"># stream producer/consumer, COPY batch writer</span>
+│   ├── mmp_attrib/    <span class="c"># attribution engine — pure functions, no IO</span>
+│   ├── mmp_providers/ <span class="c"># partner adapters behind one Protocol</span>
+│   ├── mmp_crypto/    <span class="c"># key hashing, HMAC, envelope encryption, IP hashing</span>
+│   └── mmp_core/      <span class="c"># settings, logging, tracing, safe HTTP client</span>
+├── sdk/               <span class="c"># typescript / kotlin / swift — unchanged from v1.0</span>
+└── infra/             <span class="c"># compose, migrations runner, k6 load profiles</span>
+</pre>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="data">
+    <div class="sec-head">
+      <div class="eyebrow">Data</div>
+      <h2>One Postgres, split into hot, warm and cold shapes</h2>
+    </div>
+
+    <p>Three classes of table live in the same database with very different treatment. Business tables are small, mutable and fully constrained. Event tables are append-only, partitioned by day, and carry the minimum index set that the read path actually uses. Rollup tables are derived, rebuildable and the only thing the dashboard is allowed to query.</p>
+
+    <h3>Business tables</h3>
+    <p>Carried over from v1.0 essentially unchanged — <code>users</code>, <code>organizations</code>, <code>organization_members</code>, <code>apps</code>, <code>api_keys</code>, <code>campaigns</code>, <code>tracking_links</code>, <code>integrations</code>, <code>provider_integrations</code>, <code>postback_rules</code>, <code>postback_deliveries</code>, <code>webhooks</code>, <code>consent_states</code>, <code>conversion_mappings</code>. Every one gets <code>organization_id</code>, an RLS policy, and a foreign key with an explicit <code>ON DELETE</code> rule. UUIDv7 primary keys throughout, generated in Python, so index inserts stay time-local instead of scattering across the btree the way v4 does.</p>
+
+    <h3>Event tables</h3>
+    <p>Declarative range partitioning on the timestamp, one partition per day, created a week ahead by a scheduled job and dropped wholesale at retention. Retention by <code>DROP TABLE</code> costs nothing; retention by <code>DELETE</code> would generate hundreds of millions of dead tuples and hand autovacuum a problem it cannot win.</p>
+
+<pre><span class="c">-- clicks: written by the click consumer in COPY batches</span>
+<span class="k">CREATE TABLE</span> clicks (
+  click_id          uuid        <span class="k">NOT NULL</span>,      <span class="c">-- v7, minted at the edge</span>
+  clicked_at        timestamptz <span class="k">NOT NULL</span>,
+  organization_id   uuid        <span class="k">NOT NULL</span>,
+  app_id            uuid        <span class="k">NOT NULL</span>,
+  campaign_id       uuid,
+  tracking_link_id  uuid        <span class="k">NOT NULL</span>,
+  device_hash       bytea,                    <span class="c">-- HMAC(gaid|idfa, daily pepper)</span>
+  ip_hash           bytea,                    <span class="c">-- HMAC(ip, daily pepper). raw IP never stored.</span>
+  country           char(2),
+  platform          smallint,
+  os_version        text,
+  device_model      text,
+  sub1 text, sub2 text, sub3 text,
+  <span class="k">PRIMARY KEY</span> (clicked_at, click_id)
+) <span class="k">PARTITION BY RANGE</span> (clicked_at);
+
+<span class="c">-- per-partition indexes. deliberately few: every index is insert tax.</span>
+<span class="k">CREATE INDEX</span> ON clicks_2026_09_07 (click_id);                       <span class="c">-- deterministic match</span>
+<span class="k">CREATE INDEX</span> ON clicks_2026_09_07 (app_id, device_hash, clicked_at <span class="k">DESC</span>)
+  <span class="k">WHERE</span> device_hash <span class="k">IS NOT NULL</span>;                                 <span class="c">-- referrer/device match</span>
+<span class="k">CREATE INDEX</span> ON clicks_2026_09_07 <span class="k">USING BRIN</span> (clicked_at);         <span class="c">-- range scans, ~0 cost</span>
+
+<span class="c">-- events: same partitioning. dedup enforced by the unique key.</span>
+<span class="k">CREATE TABLE</span> events (
+  event_id        uuid        <span class="k">NOT NULL</span>,        <span class="c">-- client-minted, idempotency anchor</span>
+  received_at     timestamptz <span class="k">NOT NULL</span>,        <span class="c">-- server clock. partition key. authoritative.</span>
+  occurred_at     timestamptz <span class="k">NOT NULL</span>,        <span class="c">-- client clock. reported, never trusted.</span>
+  organization_id uuid        <span class="k">NOT NULL</span>,
+  app_id          uuid        <span class="k">NOT NULL</span>,
+  event_name      text        <span class="k">NOT NULL</span>,
+  anonymous_id    text        <span class="k">NOT NULL</span>,
+  user_id         text,
+  session_id      uuid,
+  platform        smallint,
+  app_version     text,
+  revenue_minor   bigint,                     <span class="c">-- integer minor units. never float.</span>
+  currency        char(3),
+  properties      jsonb        <span class="k">NOT NULL DEFAULT</span> '{}',
+  <span class="k">PRIMARY KEY</span> (received_at, app_id, event_id)
+) <span class="k">PARTITION BY RANGE</span> (received_at);
+
+<span class="c">-- attributions: one row per install, immutable. corrections append, never update.</span>
+<span class="k">CREATE TABLE</span> attributions (
+  attribution_id  uuid <span class="k">PRIMARY KEY</span>,
+  app_id          uuid <span class="k">NOT NULL</span>,
+  install_key     text <span class="k">NOT NULL</span>,        <span class="c">-- app_id + anonymous_id</span>
+  click_id        uuid,
+  campaign_id     uuid,
+  method          text <span class="k">NOT NULL</span>,        <span class="c">-- referrer | click_id | organic</span>
+  attributed_at   timestamptz <span class="k">NOT NULL</span>,
+  window_days     smallint <span class="k">NOT NULL</span>,
+  superseded_by   uuid <span class="k">REFERENCES</span> attributions(attribution_id),
+  <span class="k">UNIQUE</span> (app_id, install_key) <span class="k">WHERE</span> superseded_by <span class="k">IS NULL</span>
+);
+</pre>
+
+    <div class="note good">
+      <h4>Why <code>UNIQUE (app_id, install_key)</code> is the most important line in the schema</h4>
+      <p>"One install resolves to one attribution" is the invariant the whole product's numbers rest on. Enforcing it in application code means enforcing it in a worker that may be running four copies of itself against a queue that redelivers on timeout. Enforcing it as a partial unique index means the database refuses the duplicate no matter how many workers race, and the loser's <code>ON CONFLICT DO NOTHING</code> makes the race a non-event.</p>
+    </div>
+
+    <h3>Rollup tables</h3>
+    <p>The dashboard never touches <code>events</code> or <code>clicks</code>. It reads <code>rollup_hourly</code> and <code>rollup_daily</code>, keyed by <code>(app_id, campaign_id, platform, country, event_name, bucket)</code> with counters and revenue sums. A worker refreshes the trailing window every minute with an idempotent <code>INSERT … ON CONFLICT DO UPDATE</code> over a bounded time range, and re-refreshes the last 72 hours nightly so late events from offline SDK queues land in the reported numbers. The event explorer is the one screen allowed to hit raw partitions, always with a mandatory date range and a statement timeout.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="speed">
+    <div class="sec-head">
+      <div class="eyebrow">Speed</div>
+      <h2>Two hot paths, and nothing else is hot</h2>
+    </div>
+
+    <p>Everything that matters for speed happens in two request handlers. The redirect decides whether users reach the app store, and the ingest endpoint decides whether the SDK's queue drains. Both are built to do a fixed, tiny amount of work with no unbounded call in the path.</p>
+
+    <h3>Path one — the click redirect</h3>
+
+    <div class="flow">
+      <div class="step"><div class="n">1</div><div class="body"><b>Resolve the tracking code from process memory</b><span>Every active tracking link is held in a per-process dict, refreshed on Postgres <code>LISTEN/NOTIFY</code> and re-synced every 60 seconds as a backstop. The redirect performs zero database queries. A cold miss falls back to a single indexed lookup and populates the cache.</span></div></div>
+      <div class="step"><div class="n">2</div><div class="body"><b>Mint a UUIDv7 click_id</b><span>Time-ordered, so it sorts into the index instead of scattering, and its embedded timestamp gives a free sanity check against click injection.</span></div></div>
+      <div class="step"><div class="n">3</div><div class="body"><b>Append to a bounded in-process buffer</b><span>Not an <code>await</code> on Redis. A <code>deque</code> with a hard cap; a background task ships it to the Redis Stream in pipelined batches every 50 ms. If Redis is down the buffer fills and sheds oldest-first — the redirect still succeeds.</span></div></div>
+      <div class="step"><div class="n">4</div><div class="body"><b>302 to the platform destination</b><span>Chosen by parsed User-Agent, with <code>click_id</code> appended to the store URL's referrer parameter for Android and carried in the deferred-link context for iOS.</span></div></div>
+      <div class="step"><div class="n">5</div><div class="body"><b>Consumer persists in COPY batches</b><span>The stream consumer accumulates up to 5,000 rows or 250 ms, then <code>copy_records_to_table</code> into today's partition, then acks. Crash before ack means redelivery, which the dedup key absorbs.</span></div></div>
+    </div>
+
+    <h4>Latency budget — tracker p99, server-side</h4>
+    <div class="ladder">
+      <div class="rung"><div class="lbl">TLS + HTTP parse</div><div class="bar"><span class="net" style="width:22%"></span></div><div class="ms">2.2 ms</div></div>
+      <div class="rung"><div class="lbl">Route + UA parse</div><div class="bar"><span style="width:14%"></span></div><div class="ms">1.4 ms</div></div>
+      <div class="rung"><div class="lbl">Link lookup (in-process)</div><div class="bar"><span style="width:1%"></span></div><div class="ms">0.05 ms</div></div>
+      <div class="rung"><div class="lbl">UUIDv7 + IP hash</div><div class="bar"><span style="width:3%"></span></div><div class="ms">0.3 ms</div></div>
+      <div class="rung"><div class="lbl">Buffer append</div><div class="bar"><span style="width:1%"></span></div><div class="ms">0.02 ms</div></div>
+      <div class="rung"><div class="lbl">Response serialize</div><div class="bar"><span style="width:8%"></span></div><div class="ms">0.8 ms</div></div>
+      <div class="rung"><div class="lbl">GIL / scheduling jitter</div><div class="bar"><span style="width:32%"></span></div><div class="ms">3.2 ms</div></div>
+      <div class="rung total"><div class="lbl">Server p99 target</div><div class="bar"><span style="width:80%"></span></div><div class="ms">&lt; 8 ms</div></div>
+    </div>
+    <p style="font-size:14px;color:var(--muted)">Published external SLO: <strong>p99 &lt; 120 ms end-to-end</strong> from an in-region client, which leaves ~110 ms of headroom for network and TLS handshake. This is the number ad networks will ask for, so it goes in writing before anyone integrates — and it is verified by a k6 profile in CI, not asserted.</p>
+
+    <h3>Path two — event ingestion</h3>
+    <p>Authenticate by key prefix against a Redis-cached key record, verify payload size (256 KB hard cap, and a decompressed-size cap so a gzip bomb cannot be used to burn CPU), validate with <code>msgspec</code> against a struct rather than a Pydantic model, publish the batch to the stream, return <code>202</code>. Target p99 under 15 ms for a 20-event batch. The endpoint never reads Postgres and never computes anything an analyst would recognize.</p>
+
+    <div class="cards">
+      <div class="card"><span class="big">100k+</span><p><b>rows/sec</b> sustained insert into a partitioned table via binary <code>COPY</code> on a single 8-core Postgres — the ceiling is disk fsync, not Python.</p></div>
+      <div class="card"><span class="big">~5k</span><p><b>redirects/sec</b> per 4-core tracker instance at the budget above. Scale by adding instances; the tier is stateless.</p></div>
+      <div class="card"><span class="big">&lt; 30s</span><p><b>click-to-queryable</b> p95, from redirect to the row appearing in a rollup. Attribution resolves within the same window.</p></div>
+    </div>
+
+    <h3>Read-path rules, enforced in code</h3>
+    <ul>
+      <li>Every analytics query requires an explicit date range; unbounded requests are rejected, not silently capped.</li>
+      <li>Maximum range 90 days without an export flag; export goes through a separate async job that writes to object storage.</li>
+      <li><code>statement_timeout = 15s</code> on the analytics role, <code>2s</code> on the tracker role. A slow query dies rather than holding a pooled connection hostage.</li>
+      <li>Redis cache with a 5-minute TTL on dashboard aggregate reads, keyed including <code>organization_id</code> so a cache key can never cross a tenant.</li>
+      <li>Query cost returned in a response header, so an expensive dashboard screen is visible before it is a production incident.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="accuracy">
+    <div class="sec-head">
+      <div class="eyebrow">Accuracy</div>
+      <h2>The correctness contract</h2>
+    </div>
+
+    <p>An MMP's product <em>is</em> its numbers. Async ingestion, retries and offline SDK queues all mean at-least-once delivery, so exactly-once has to be produced at the write, by the database, not hoped for in the transport.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Invariant</th><th>Enforced by</th><th>Failure it prevents</th></tr></thead>
+        <tbody>
+          <tr><td>An event is counted once</td><td class="mono">PK (received_at, app_id, event_id) + ON CONFLICT DO NOTHING</td><td>SDK retries and stream redelivery inflating install and purchase counts.</td></tr>
+          <tr><td>One install → one attribution</td><td class="mono">partial UNIQUE (app_id, install_key)</td><td>Concurrent workers double-attributing, and double-paying a network.</td></tr>
+          <tr><td>A postback fires once per rule</td><td class="mono">UNIQUE (rule_id, event_id) on deliveries, claimed before send</td><td>Duplicate conversions corrupting a live campaign's optimization.</td></tr>
+          <tr><td>Time is server time</td><td class="mono">received_at authoritative; occurred_at stored, skew &gt; 24h flagged</td><td>A device with a wrong clock landing events in last month's partition and report.</td></tr>
+          <tr><td>Money is exact</td><td class="mono">bigint minor units + ISO currency; FX applied at report time</td><td>Float drift in revenue totals, and un-auditable historical conversions.</td></tr>
+          <tr><td>History is immutable</td><td class="mono">attributions append-only via superseded_by</td><td>Re-attribution silently rewriting numbers a client already reported to a network.</td></tr>
+          <tr><td>Late events still count</td><td class="mono">nightly 72h rollup re-refresh</td><td>A week of offline SDK events arriving after the rollup and never appearing.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Attribution, precisely</h3>
+    <p>Deterministic last-click only, in a strict precedence order — no probabilistic fingerprinting, as the original spec correctly insisted:</p>
+    <ol>
+      <li><strong>Play Install Referrer</strong> carrying our <code>click_id</code>. Ground truth on Android; nothing overrides it.</li>
+      <li><strong>Explicit <code>click_id</code></strong> handed to the SDK through a deferred deep link.</li>
+      <li><strong>Device-hash match</strong> — an exact <code>gaid</code>/<code>idfa</code> hash present at both click and install, within the window.</li>
+      <li><strong>Organic</strong>. If none of the above match, the install is organic. There is no fourth guess.</li>
+    </ol>
+    <p>Default window 7 days for installs, 30 days for post-install events, configurable per app, and <strong>stored on every attribution row</strong> — so when someone changes the window, historical rows still explain themselves. Ties break to the most recent qualifying click by <code>clicked_at</code>.</p>
+
+    <div class="note risk">
+      <h4>Fingerprint fallback is a decision, not a default</h4>
+      <p>The Lean section of the v1.0 spec suggests IP + device model + OS fallback for post-ATT iOS. That materially raises install match rate <em>and</em> is the technique Apple's rules prohibit for cross-app attribution; it also produces attributions that cannot be defended to a client who asks how a number was derived. My recommendation is to ship without it and let iOS be honestly SKAN-shaped. If commercial pressure forces it, it must be a per-app opt-in flag, recorded in <code>attributions.method</code> as <code>probabilistic</code>, and reported in a separate column in every dashboard — never blended into deterministic totals.</p>
+    </div>
+
+    <h3>Proving accuracy rather than claiming it</h3>
+    <ul>
+      <li><strong>A golden replay suite.</strong> A fixture set of click/install/event sequences — duplicates, out-of-order arrivals, clock skew, window edges, injection timing — replayed against a fresh database in CI, asserting exact expected attribution output. This is the regression net for every future change to the engine.</li>
+      <li><strong>A daily reconciliation job.</strong> Counts accepted at the edge versus rows persisted versus rows in rollups, per app per hour, written to <code>pipeline_audit</code>. Any drift beyond the dedup rate alerts. Silent loss is the failure mode that kills trust in an MMP, and it is only detectable if you count both ends.</li>
+      <li><strong>Published measurement definitions.</strong> What counts as an install, a session, an active user, a day boundary — written down once, in the app's timezone, and referenced by both the code and the sales deck.</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="security">
+    <div class="sec-head">
+      <div class="eyebrow">Security</div>
+      <h2>Tenancy, credentials, and the outbound edge</h2>
+    </div>
+
+    <p>Three areas carry nearly all the real risk in this product: one tenant reading another's data, stored partner credentials leaking, and the postback engine being turned into a request forwarder. Everything else is standard hardening.</p>
+
+    <h3>Multi-tenant isolation, twice</h3>
+    <p>Application middleware resolves the active organization and scopes every query. Independently, Postgres row-level security enforces the same rule at the storage layer. The API connects as a role with RLS enforced and <em>without</em> <code>BYPASSRLS</code>; each request opens a transaction and sets the tenant for its duration.</p>
+
+<pre><span class="k">ALTER TABLE</span> campaigns <span class="k">ENABLE ROW LEVEL SECURITY</span>;
+<span class="k">ALTER TABLE</span> campaigns <span class="k">FORCE ROW LEVEL SECURITY</span>;
+
+<span class="k">CREATE POLICY</span> org_isolation <span class="k">ON</span> campaigns
+  <span class="k">USING</span>      (organization_id = current_setting('mmp.org_id')::uuid)
+  <span class="k">WITH CHECK</span> (organization_id = current_setting('mmp.org_id')::uuid);
+
+<span class="c"># and in the request scope — SET LOCAL, so it dies with the transaction</span>
+<span class="k">async with</span> pool.acquire() <span class="k">as</span> conn, conn.transaction():
+    <span class="k">await</span> conn.execute(<span class="c">"SELECT set_config('mmp.org_id', $1, true)"</span>, str(org_id))
+    ...
+</pre>
+
+    <p>Four database roles, least privilege each: <code>mmp_api</code> (RLS-enforced, no DDL), <code>mmp_tracker</code> (INSERT on event tables only, 2s statement timeout), <code>mmp_worker</code> (RLS bypass, scoped to the tables it processes, used only by code that has no request context), <code>mmp_readonly</code> (analytics and BI tools). No service ever connects as owner or superuser.</p>
+
+    <div class="note warn">
+      <h4>The RLS + PgBouncer trap</h4>
+      <p>In transaction pooling mode, a connection is handed to another request the moment your transaction ends. A tenant set with <code>SET</code> instead of <code>SET LOCAL</code> leaks into the next tenant's queries — a cross-tenant read with no bug in your query code. The shared pool helper must be the only place that sets tenancy, it must always use <code>SET LOCAL</code> inside an explicit transaction, and there must be a test that asserts a connection returned to the pool has no <code>mmp.org_id</code>.</p>
+    </div>
+
+    <h3>Credentials and keys</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Secret</th><th>At rest</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>User password</td><td class="mono">argon2id</td><td>Slow by design. Login only, rate-limited per account and per IP.</td></tr>
+          <tr><td>App API key</td><td class="mono">HMAC-SHA256(key, pepper)</td><td>32 random bytes, shown once. Prefix stored plaintext and indexed for O(1) lookup; pepper lives in KMS, not the database. Argon2 is wrong here — this verifies on every ingest request.</td></tr>
+          <tr><td>S2S secret</td><td class="mono">HMAC-SHA256(secret, pepper)</td><td>Separate credential class from SDK keys. Signs canonical requests.</td></tr>
+          <tr><td>Provider credentials</td><td class="mono">AES-256-GCM, KMS-wrapped DEK</td><td>Envelope encryption. Columns: <code>ciphertext</code>, <code>wrapped_dek</code>, <code>key_version</code>, <code>aad</code> bound to <code>organization_id</code>. Rotation re-wraps without re-encrypting payloads.</td></tr>
+          <tr><td>Webhook signing secret</td><td class="mono">encrypted, retrievable</td><td>Must be recoverable to sign; encrypted with the same envelope scheme, never returned by the API after creation.</td></tr>
+          <tr><td>Session</td><td class="mono">server-side in Redis</td><td>Opaque httpOnly SameSite=Lax cookie + CSRF token. Revocable — a stateless JWT is not.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>S2S requests are signed over a canonical string of method, path, timestamp, and body digest; the server rejects a timestamp more than 5 minutes off, caches the nonce in Redis for that window to kill replays, and compares with <code>hmac.compare_digest</code> — never <code>==</code>.</p>
+
+    <h3>The outbound edge: SSRF is the sharpest risk here</h3>
+    <p>Postback rules and webhooks are, by design, user-supplied URLs that our servers fetch. Unguarded, that is a proxy into the VPC and straight at the cloud metadata endpoint. The mitigation cannot be a naive hostname regex, because DNS can be rebound between validation and connection.</p>
+    <ul>
+      <li>Resolve the hostname ourselves, reject any address in private, loopback, link-local, or metadata ranges (<code>169.254.0.0/16</code> included), then <strong>connect to the validated IP</strong> with the original <code>Host</code> header — closing the rebinding window.</li>
+      <li>HTTPS only. Redirects disabled entirely. Response body read with a hard size cap and a 10-second total timeout.</li>
+      <li>Per-organization domain allowlist for postback destinations, defaulting to the known networks' domains.</li>
+      <li>All outbound delivery leaves through a dedicated egress security group with no route to internal services — a control that holds even if the application check is bypassed.</li>
+    </ul>
+
+    <div class="note risk">
+      <h4>URL templates must not be a template engine</h4>
+      <p>Postback URL templates take variables like <code>{{click_id}}</code>. Rendering those with Jinja2 hands anyone who can create a postback rule a path to server-side template injection and, from there, code execution. Substitution is a fixed allowlist of variable names against a dict, with every value URL-encoded on insertion. No engine, no expression evaluation, no attribute access.</p>
+    </div>
+
+    <h3>PII and data governance</h3>
+    <ul>
+      <li><strong>Raw IPs are never stored.</strong> Geo is resolved at the edge, then the IP is HMAC'd with a pepper that rotates daily and the original discarded. Rotation caps correlation to a single day.</li>
+      <li><strong>Advertising IDs are hashed at rest</strong> and their rows dropped when the attribution window closes.</li>
+      <li><strong>Consent is checked before processing</strong>, not after. Denied purposes strip fields at ingest, before anything is persisted.</li>
+      <li><strong>Deletion is a real workflow</strong>: a request enqueues deletion across partitions, rollups and the postback log, and records completion in an append-only, hash-chained audit table.</li>
+      <li><strong>Logs are structured and PII-free</strong>, with a redaction filter on the logger and a CI test that fails if a known-sensitive field name appears in a log call.</li>
+    </ul>
+
+    <h3>Baseline, automated</h3>
+    <p><code>ruff</code>, <code>mypy --strict</code>, <code>bandit</code> and <code>semgrep</code> gate every PR; <code>pip-audit</code> against the hash-pinned lockfile gates every build. A repo rule bans f-string SQL outright — asyncpg is parameterized-only, and dynamic <code>ORDER BY</code> goes through an identifier allowlist. Queue payloads are JSON or msgpack; <code>pickle</code> is banned in the codebase, which is the single largest reason to avoid Celery's defaults here. Containers run non-root with a read-only filesystem. Security headers and a strict CORS policy are set centrally, with the tracking endpoints carrying their own separate, deliberately permissive-but-credential-less policy.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="scale">
+    <div class="sec-head">
+      <div class="eyebrow">Scale</div>
+      <h2>How far this carries, and the trigger to change</h2>
+    </div>
+
+    <p>Sizing assumes a modest per-event row and a working set that stays in memory for recent partitions.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Monthly events</th><th class="mono">Postgres</th><th class="mono">Tracker</th><th class="mono">Workers</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td class="num">10 M</td><td>1 × 4 vCPU / 16 GB</td><td>1 instance</td><td>1</td><td><span class="pill p-ok">Comfortable</span> Single-node everything.</td></tr>
+          <tr><td class="num">100 M</td><td>1 × 8 vCPU / 32 GB + replica</td><td>2 instances</td><td>2–3</td><td><span class="pill p-ok">Comfortable</span> Rollups now mandatory for every dashboard read.</td></tr>
+          <tr><td class="num">1 B</td><td>16 vCPU / 64 GB, reads on replica</td><td>4+ instances</td><td>6+</td><td><span class="pill p-warn">Tight</span> Raw explorer queries get slow. Retention shortens.</td></tr>
+          <tr><td class="num">5 B+</td><td>—</td><td>—</td><td>—</td><td><span class="pill p-flag">Graduate</span> Add a columnar sink.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Adding ClickHouse later is a new consumer group on the same Redis Stream plus a second write in the rollup worker. Business data, attribution and the API contract are untouched. That is the whole reason ingestion is stream-based rather than direct-to-Postgres, and it is worth the small extra complexity now.</p>
+
+    <h4>Graduation triggers — review at each, don't pre-build for them</h4>
+    <div class="cards">
+      <div class="card"><h4>Read latency</h4><p>Rollup-backed dashboard p95 over 500 ms with the query plan already correct → columnar analytics store.</p></div>
+      <div class="card"><h4>Write pressure</h4><p>Sustained ingest above 30k events/sec, or COPY batch latency rising with the backlog → partition by app as well as time, or shard.</p></div>
+      <div class="card"><h4>Retention</h4><p>Raw retention needed beyond 12 months at 1 B+/month → cold tier in object storage with an external query engine.</p></div>
+      <div class="card"><h4>Residency</h4><p>A first EU client asking where data lives → regional deployment, decided before signing, not after.</p></div>
+    </div>
+
+    <h3>Gaps from the v1.0 review that this plan closes</h3>
+    <p>The critical review in the original document flagged several launch blockers. Three of them are folded into the phase plan below rather than deferred: <strong>API versioning</strong> (a written policy with a 90-day deprecation window, in Phase 0, before any external integration), <strong>usage metering</strong> (a <code>usage_rollup</code> table from Phase 3, so billing data exists before billing does), and <strong>a postback sandbox</strong> (a test mode that fires against an internal echo endpoint, in Phase 9, so nobody sends test conversions to a live ad account). Raw data export lands in Phase 12. The cost model per million events is an input I need from you, not something I can decide — see <a href="#open">Open decisions</a>.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="phases">
+    <div class="sec-head">
+      <div class="eyebrow">Phases</div>
+      <h2>Revised build order</h2>
+    </div>
+
+    <p>Thirteen phases, sequenced so that nothing depending on correctness is built before the mechanism that guarantees it. Run one phase at a time; type checks, security gates and the golden replay suite pass before the next one starts.</p>
+
+    <div class="phase"><div class="ph"><b>0</b>Phase</div><div><h3>Foundation and contracts</h3><p>uv workspace, four services booting, Docker Compose with Postgres and Redis, settings validated at startup with fail-fast, structured JSON logging with request and correlation IDs, health and readiness endpoints, CI with ruff/mypy/bandit/pip-audit. The API versioning and deprecation policy is written here, in <code>API_VERSIONING.md</code>, before a single external endpoint exists.</p><div class="ships"><b>Ships:</b> everything starts, nothing does anything.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>1</b>Phase</div><div><h3>Schema, RLS and tenancy</h3><p>Alembic migrations for all business tables, partitioned event tables with the partition-maintenance job, RLS policies and the four database roles, the pooled-connection helper that is the only way to set a tenant. Seed script. The phase is done when a test proves a connection returned to the pool carries no tenant setting and a cross-org read fails at the database.</p><div class="ships"><b>Ships:</b> the isolation guarantee everything else assumes.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>2</b>Phase</div><div><h3>Auth, organizations, apps, API keys</h3><p>argon2id passwords, Redis-backed sessions with CSRF, roles, org switching. App registration with package-name and bundle-ID validation. API key generation with pepper-HMAC storage, prefix lookup, rotation and revocation. Security tests assert the raw key never appears in the database or in a log line.</p><div class="ships"><b>Ships:</b> a credential a client app could authenticate with.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>3</b>Phase</div><div><h3>Ingest pipeline end to end</h3><p>Redis Streams with consumer groups, the tracker's <code>POST /v1/events</code>, the batching COPY consumer, dedup on conflict, dead-letter handling, graceful drain on SIGTERM. Usage rollup table from day one. A k6 load profile in CI that fails the build if p99 regresses past budget.</p><div class="ships"><b>Ships:</b> events land, exactly once, at documented throughput.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>4</b>Phase</div><div><h3>Campaigns, links and click tracking</h3><p>Campaign and tracking-link CRUD, unguessable random codes, the in-process link cache with LISTEN/NOTIFY invalidation, the redirect handler with its buffer-and-ship click writer, non-blocking bot classification. Latency budget verified under load before this phase closes.</p><div class="ships"><b>Ships:</b> a link you can hand a network. <span class="pill p-sig">latency gate</span></div></div></div>
+
+    <div class="phase"><div class="ph"><b>5</b>Phase</div><div><h3>Attribution and Android Install Referrer</h3><p>The attribution engine as pure functions in <code>mmp_attrib</code> with no IO, the attribution worker, the partial unique index enforcing one-install-one-attribution, the identity lookup cache in Redis keyed by anonymous and user ID. Play Install Referrer handling lands here, not later — it is the highest-fidelity signal available and it is Android's whole story.</p><div class="ships"><b>Ships:</b> attributed installs. <span class="pill p-sig">golden replay suite</span></div></div></div>
+
+    <div class="phase"><div class="ph"><b>6</b>Phase</div><div><h3>Sessions, rollups and the analytics API</h3><p>Session lifecycle with Redis ephemeral state and a 30-minute default timeout, hourly and daily rollup workers with the late-arrival re-refresh, analytics endpoints with mandatory date ranges, query budgets, statement timeouts and tenant-scoped caching.</p><div class="ships"><b>Ships:</b> numbers you can put on a screen.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>7</b>Phase</div><div><h3>Dashboard</h3><p>Server-rendered overview, apps, campaigns, links, event explorer, attribution and settings. Real data only. Loading, empty and error states designed rather than defaulted.</p><div class="ships"><b>Ships:</b> the product someone can actually use.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>8</b>Phase</div><div><h3>React Native SDK with offline queue</h3><p><code>initialize</code>, <code>track</code>, <code>identify</code>, <code>setUserId</code>, <code>trackPurchase</code>. Client-minted UUIDv7 event IDs, persistent queue, batching, exponential backoff, events removed only after a 202, size cap and expiry, never on the UI thread. SDK publishing, ownership and versioning policy is written before the first external release.</p><div class="ships"><b>Ships:</b> integration without writing HTTP calls by hand.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>9</b>Phase</div><div><h3>S2S, postbacks and webhooks</h3><p>Signed S2S ingestion with replay protection, the postback engine with allowlist substitution and the SSRF-safe HTTP client, delivery state machine with idempotent claims and retries, HMAC-signed webhooks with auto-disable, and the postback sandbox mode. Full delivery logs, manual retry from the dashboard.</p><div class="ships"><b>Ships:</b> the revenue-closing loop. <span class="pill p-flag">SSRF review gate</span></div></div></div>
+
+    <div class="phase"><div class="ph"><b>10</b>Phase</div><div><h3>Reliability and a real security audit</h3><p>Metrics and tracing, queue-depth alerting, the daily reconciliation job and <code>pipeline_audit</code>, backup and restore actually rehearsed. Then the full audit from the original Prompt 20, adapted: tenancy, RLS bypass paths, key handling, SSRF, deserialization, rate-limit coverage, dependency CVEs. Produces <code>SECURITY.md</code> and a production checklist.</p><div class="ships"><b>Ships:</b> permission to put real client traffic on it.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>11</b>Phase</div><div><h3>Privacy, consent and the provider framework</h3><p>Consent state model with purpose-aware processing, retention configuration, deletion workflows, hash-chained audit log. The provider adapter <code>Protocol</code>, envelope-encrypted credentials, and a generic custom provider as the first implementation — with no provider-specific branch anywhere in the core engine.</p><div class="ships"><b>Ships:</b> the answer to a procurement questionnaire.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>12</b>Phase</div><div><h3>Deep links, fraud signals, export, scale work</h3><p>App Links and Universal Links with deferred context handoff, rule-based fraud signals stored separately from raw events, raw data export to object storage, and whatever the graduation triggers say is actually needed by then.</p><div class="ships"><b>Ships:</b> Tier B completeness.</div></div></div>
+
+    <div class="phase"><div class="ph"><b>13</b>Phase</div><div><h3>iOS attribution — a separate workstream</h3><p>Not a phase so much as a parallel program, exactly as the original review argued: SKAdNetwork 4.0 adapter, conversion value mapping, Apple postback signature verification, delayed aggregated storage, and a test matrix across ATT granted/denied and postback received/missing. Three to six months of dedicated engineering, started only after Phase 10 ships. Nothing about iOS accuracy gets promised to a client before this lands.</p><div class="ships"><b>Ships:</b> credible iOS numbers. <span class="pill p-mute">parallel track</span></div></div></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="prompts">
+    <div class="sec-head">
+      <div class="eyebrow">Prompts</div>
+      <h2>The 34 build prompts, remapped</h2>
+    </div>
+
+    <p>The original prompt sequence still works as a build script. This is the delta — what each prompt becomes on this stack. Prompts whose substance is unchanged are marked as such; the others carry a specific instruction that should be pasted into the prompt so the implementation lands on the right primitive.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th class="mono">#</th><th>Prompt</th><th>Phase</th><th>Change for Python + Postgres</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>Foundation</td><td class="mono">0</td><td>uv workspace instead of pnpm/Turborepo; four Python services; Compose drops the ClickHouse container. Add the API versioning doc.</td></tr>
+          <tr><td class="num">2</td><td>Schema</td><td class="mono">1</td><td>SQLAlchemy 2.0 + Alembic instead of Drizzle. Adds partitioned event tables, the partition-maintenance job, and RLS policies + roles.</td></tr>
+          <tr><td class="num">3</td><td>Authentication</td><td class="mono">2</td><td>argon2id, not bcrypt. Redis server-side sessions + CSRF instead of JWT.</td></tr>
+          <tr><td class="num">4</td><td>Organizations</td><td class="mono">1–2</td><td>Middleware scoping <em>plus</em> RLS. Isolation tests must include the pooled-connection leak case.</td></tr>
+          <tr><td class="num">5</td><td>App management</td><td class="mono">2</td><td><span class="pill p-mute">unchanged</span> Pydantic validators for package name and bundle ID.</td></tr>
+          <tr><td class="num">6</td><td>API key system</td><td class="mono">2</td><td>HMAC-SHA256 with a KMS pepper, not a slow hash — this verifies on every ingest request. <code>secrets.token_bytes(32)</code>.</td></tr>
+          <tr><td class="num">7</td><td>Queue infrastructure</td><td class="mono">3</td><td>Redis Streams with consumer groups for ingest; arq for outbound jobs. JSON/msgpack payloads only, pickle banned.</td></tr>
+          <tr><td class="num">8</td><td>Tracking API</td><td class="mono">3</td><td>Starlette, not FastAPI, on this route. msgspec validation, decompressed-size cap, buffer-and-ship rather than awaiting Redis.</td></tr>
+          <tr><td class="num">9</td><td>Event worker</td><td class="mono">3</td><td>Binary <code>COPY</code> via <code>asyncpg.copy_records_to_table</code>; batch of 5,000 or 250 ms; ack after commit.</td></tr>
+          <tr><td class="num">10</td><td>ClickHouse schema</td><td class="mono">1</td><td><span class="pill p-flag">replaced</span> Becomes daily range partitioning, BRIN on time, minimal btrees, drop-partition retention.</td></tr>
+          <tr><td class="num">11</td><td>Tracking links</td><td class="mono">4</td><td><span class="pill p-mute">unchanged</span> Codes from <code>secrets.token_urlsafe</code> — unguessable, not sequential.</td></tr>
+          <tr><td class="num">12</td><td>Click tracking</td><td class="mono">4</td><td>In-process link cache with LISTEN/NOTIFY invalidation. Add the explicit p99 budget and the k6 gate.</td></tr>
+          <tr><td class="num">13</td><td>Install attribution</td><td class="mono">5</td><td>Pure-function engine, partial unique index for the one-install invariant, golden replay suite as the acceptance test.</td></tr>
+          <tr><td class="num">14</td><td>Session management</td><td class="mono">6</td><td><span class="pill p-mute">unchanged</span> Redis ephemeral state, Postgres for durable session rows.</td></tr>
+          <tr><td class="num">15</td><td>Analytics API</td><td class="mono">6</td><td>Reads rollup tables, not raw events. Mandatory date range, query budget, <code>statement_timeout</code>, tenant-keyed cache.</td></tr>
+          <tr><td class="num">16</td><td>Dashboard</td><td class="mono">7</td><td>Jinja + HTMX server-rendered; charts as server-generated SVG or a small client chart lib. Real API data only.</td></tr>
+          <tr><td class="num">17</td><td>Webhooks</td><td class="mono">9</td><td>Adds the SSRF-safe HTTP client — resolve, validate IP, pin, no redirects — as a hard requirement.</td></tr>
+          <tr><td class="num">18</td><td>First mobile SDK</td><td class="mono">8</td><td><span class="pill p-mute">unchanged</span> TypeScript. Add the publishing and versioning policy as a deliverable.</td></tr>
+          <tr><td class="num">19</td><td>Reliability</td><td class="mono">10</td><td><code>structlog</code> instead of pino; OpenTelemetry traces; correlation ID propagated through stream message headers.</td></tr>
+          <tr><td class="num">20</td><td>Security audit</td><td class="mono">10</td><td>Rescoped to Python risks: RLS bypass, pooled tenancy leak, SSRF, deserialization, template injection, f-string SQL, dependency CVEs.</td></tr>
+          <tr><td class="num">21</td><td>Offline SDK queue</td><td class="mono">8</td><td><span class="pill p-mute">unchanged</span> Client mints UUIDv7 so client and server dedup agree.</td></tr>
+          <tr><td class="num">22</td><td>S2S events</td><td class="mono">9</td><td>Canonical-request HMAC, <code>hmac.compare_digest</code>, Redis nonce cache, ±5 min skew window.</td></tr>
+          <tr><td class="num">23</td><td>Attribution lookup</td><td class="mono">5</td><td><span class="pill p-mute">unchanged</span> Postgres source of truth, Redis cache with TTL = attribution window.</td></tr>
+          <tr><td class="num">24</td><td>Postback engine</td><td class="mono">9</td><td>Allowlist variable substitution — <strong>no Jinja</strong>. Per-org domain allowlist. Idempotent claim on <code>(rule_id, event_id)</code>.</td></tr>
+          <tr><td class="num">25</td><td>Postback dashboard</td><td class="mono">9</td><td>Adds sandbox test mode firing at an internal echo endpoint. Headers write-only after save.</td></tr>
+          <tr><td class="num">26</td><td>Android attribution</td><td class="mono">5</td><td><span class="pill p-mute">unchanged</span> Promoted earlier — it is the primary attribution signal, not an add-on.</td></tr>
+          <tr><td class="num">27</td><td>iOS architecture</td><td class="mono">13</td><td><span class="pill p-mute">unchanged</span> Separate workstream. Backend receives and verifies SKAN postbacks.</td></tr>
+          <tr><td class="num">28</td><td>Privacy and consent</td><td class="mono">11</td><td>Consent evaluated at ingest, before persistence. Hash-chained audit table.</td></tr>
+          <tr><td class="num">29</td><td>Provider framework</td><td class="mono">11</td><td>A <code>typing.Protocol</code> with adapters registered by entry point. Envelope-encrypted credentials specified up front.</td></tr>
+          <tr><td class="num">30</td><td>Deep linking</td><td class="mono">12</td><td><span class="pill p-mute">unchanged</span> Well-known files served by the tracker service.</td></tr>
+          <tr><td class="num">31</td><td>Fraud signals</td><td class="mono">12</td><td><span class="pill p-mute">unchanged</span> One rule per module; signals only, no blocking; store from day one for future training data.</td></tr>
+          <tr><td class="num">32</td><td>Analytics scaling</td><td class="mono">6</td><td><span class="pill p-flag">promoted</span> Rollups are not an optimization on this stack — they are the read path. Built in Phase 6, not deferred.</td></tr>
+          <tr><td class="num">33</td><td>Install Referrer prod</td><td class="mono">5</td><td>Merged into Phase 5 rather than trailing it by seven phases.</td></tr>
+          <tr><td class="num">34</td><td>iOS workstream</td><td class="mono">13</td><td><span class="pill p-mute">unchanged</span> The 3–6 month program.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>Two prompts to add.</strong> <em class="term">35 — Reconciliation and audit</em>: the daily count-both-ends job, <code>pipeline_audit</code>, and drift alerting. <em class="term">36 — Usage metering</em>: the billable-event rollup that must exist before you can invoice anyone, and which the v1.0 review correctly flagged as a launch blocker.</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="open">
+    <div class="sec-head">
+      <div class="eyebrow">Open</div>
+      <h2>Decisions I need from you</h2>
+    </div>
+
+    <p>I've made a default call on each of these so the plan is complete and buildable as written. Each is cheap to change now and expensive to change in Phase 6.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Question</th><th>My default</th><th>What flips it</th></tr></thead>
+        <tbody>
+          <tr><td><b>Dashboard: Python or Next.js?</b></td><td>Jinja + HTMX, one language</td><td>If a front-end developer is joining, or the UI is a sales surface with heavy interactivity, use Next.js against the same API. The API contract is identical either way, so this is reversible until Phase 7.</td></tr>
+          <tr><td><b>Is ClickHouse truly out?</b></td><td>Out of the MVP, in the design</td><td>If a signed client is already sending &gt;500 M events/month, build the columnar sink in Phase 6 instead of Phase 12.</td></tr>
+          <tr><td><b>Managed Postgres or self-hosted?</b></td><td>Managed (RDS / Cloud SQL)</td><td>Self-hosting buys TimescaleDB's continuous aggregates and compression, which would simplify the rollup workers meaningfully. Worth it only if someone owns Postgres operations.</td></tr>
+          <tr><td><b>Probabilistic iOS fallback?</b></td><td>No</td><td>A commercial requirement, taken as an explicit decision with the labelling described in <a href="#accuracy">Accuracy</a> — never as a silent default.</td></tr>
+          <tr><td><b>Cost per million events?</b></td><td>Unset</td><td>I can size infrastructure but not price the product. Give me a target and I'll tell you what the architecture has to hit; without one, engineering optimizes for nothing.</td></tr>
+          <tr><td><b>Internal tool or commercial product?</b></td><td>Commercial</td><td>If it is only for your own apps, the Lean path in the v1.0 spec is right and most of this plan is over-built. Multi-tenancy, RLS, key rotation and metering all become optional.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <h4>Where to start on Monday</h4>
+      <p>Phases 0 through 4 in order. Phase 4 puts a live tracking link in the world, and — as the original spec rightly stressed — every day without one is click data you can never recover. Do not let the SDK, the provider framework or iOS pull ahead of it.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>MMP · Python + Postgres build plan</span>
+    <span>Supersedes Master Build Specification v1.0</span>
+    <span>2026-09-07</span>
+  </footer>
+
+</div>
