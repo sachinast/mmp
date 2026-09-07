@@ -6,7 +6,16 @@ from mmp_api.app import create_app as create_api
 from mmp_tracker.app import create_app as create_tracker
 from mmp_web.app import create_app as create_web
 
-SERVICES = [("tracker", create_tracker), ("api", create_api), ("web", create_web)]
+from tests.conftest_api import build_api_settings
+
+
+def _create_api():
+    # The API opens a real connection pool at startup, so it needs the test
+    # database rather than the placeholder DSN the other two never dial.
+    return create_api(build_api_settings())
+
+
+SERVICES = [("tracker", create_tracker), ("api", _create_api), ("web", create_web)]
 
 
 @pytest.mark.parametrize(("name", "factory"), SERVICES, ids=[n for n, _ in SERVICES])

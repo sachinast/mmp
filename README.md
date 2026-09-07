@@ -48,6 +48,15 @@ make fmt       # autofix
 make audit     # dependency CVE scan against the lockfile
 ```
 
+## Credentials
+
+| Secret | At rest | Why |
+| --- | --- | --- |
+| User password | argon2id | Verified once per login, behind a rate limiter. Slow is the feature. |
+| API key | HMAC-SHA256 under a KMS pepper | Verified on **every ingest request**. A slow hash here would be a self-inflicted denial of service; 256 bits of entropy does the work instead. |
+| Partner credentials | AES-256-GCM, KMS-wrapped DEK | Must be recoverable. Bound to the owning organisation, so a row copied to another tenant fails to decrypt. |
+| Session | Opaque token in Redis | Revocable. A JWT would make logout a lie. |
+
 ## Data model
 
 Three classes of table, deliberately treated differently:
@@ -95,12 +104,17 @@ These are tests, not conventions. They fail the build:
 - **No `SET` where `SET LOCAL` belongs.** Tenancy set with session scope would
   leak to the next request on a pooled connection; a test asserts the
   `is_local` argument.
+- **Only three modules may build SQL from an identifier.** Everywhere else, an
+  f-string containing SQL fails the build. The three are in `mmp_db`, and each
+  validates identifiers against an allowlist.
+- **The raw API key leaves the system once.** Tests assert it is absent from
+  listings, from the database row, from logs, and from the object's own `repr`.
 
 ## Progress
 
 - [x] **Phase 0** — foundation, observability, quality gates, versioning policy
 - [x] **Phase 1** — schema, partitioning, RLS and tenancy
-- [ ] Phase 2 — auth, organisations, apps, API keys
+- [x] **Phase 2** — auth, organisations, apps, API keys
 - [ ] Phase 3 — ingest pipeline end to end
 - [ ] Phase 4 — campaigns, links, click tracking
 - [ ] Phase 5 — attribution and Play Install Referrer

@@ -2,7 +2,7 @@
 name = "mmp-api"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.121", "uvicorn[standard]>=0.38", "mmp-core", "mmp-crypto", "mmp-db", "mmp-attrib"]
+dependencies = ["fastapi>=0.121", "uvicorn[standard]>=0.38", "mmp-core", "mmp-crypto", "mmp-db", "mmp-attrib", "redis[hiredis]>=5.2,<6", "python-multipart>=0.0.20"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }
