@@ -2,7 +2,7 @@
 name = "mmp-db"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["sqlalchemy[asyncio]>=2.0.44", "asyncpg>=0.31", "alembic>=1.17", "mmp-core"]
+dependencies = ["sqlalchemy[asyncio]>=2.0.44", "asyncpg>=0.31", "alembic>=1.17", "psycopg[binary]>=3.2", "mmp-core"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }

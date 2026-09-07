@@ -65,3 +65,20 @@ infra-up: ## Start Postgres and Redis in containers (alternative to brew service
 
 infra-down: ## Stop the containers
 	docker compose -f infra/compose/docker-compose.yml down
+
+# ---------------------------------------------------------------- migrations
+.PHONY: migrate migrate-down migration dev-roles
+
+migrate: ## Apply all migrations
+	cd packages/mmp_db && set -a && [ -f ../../.env ] && . ../../.env; set +a; uv run alembic upgrade head
+
+migrate-down: ## Roll back one migration
+	cd packages/mmp_db && set -a && . ../../.env && set +a && uv run alembic downgrade -1
+
+migration: ## Autogenerate a migration: make migration m="add widgets"
+	cd packages/mmp_db && set -a && . ../../.env && set +a && \
+	  uv run alembic revision --autogenerate -m "$(m)"
+
+dev-roles: ## Give the application roles a login for local development
+	psql -d mmp_dev -f infra/scripts/bootstrap_dev_roles.sql
+	psql -d mmp_test -f infra/scripts/bootstrap_dev_roles.sql

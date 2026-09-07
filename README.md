@@ -20,6 +20,9 @@ cp .env.example .env
 python -c "import secrets; print(secrets.token_hex(32))"   # once per pepper
 make setup
 make db-create
+make migrate
+make dev-roles      # lets tests connect as the application roles, so RLS is
+                    # actually exercised rather than bypassed by the owner
 ```
 
 Settings are validated at boot. A missing or placeholder secret is a startup
@@ -44,6 +47,20 @@ make check     # lint + types + security + tests, exactly what CI runs
 make fmt       # autofix
 make audit     # dependency CVE scan against the lockfile
 ```
+
+## Data model
+
+Three classes of table, deliberately treated differently:
+
+| | Tables | Written by | Read by |
+| --- | --- | --- | --- |
+| **Business** | 18, ORM-mapped, RLS-enforced | the API | the API |
+| **Events** | `clicks`, `events` — day-partitioned, no ORM | `COPY` batches | rollup workers |
+| **Derived** | rollups, usage, audit | workers | the dashboard |
+
+Event tables are partitioned by day. Retention is `DROP TABLE` on an expired
+partition — deleting a day of events row by row would hand autovacuum a fight it
+cannot win on a table that is simultaneously absorbing inserts.
 
 ## Layout
 
@@ -73,11 +90,16 @@ These are tests, not conventions. They fail the build:
   asserts the key list stays complete.
 - **No placeholder secrets.** Settings reject values starting with `change`,
   `placeholder`, `todo`.
+- **No tenant table without an RLS policy.** A test walks the ORM metadata and
+  fails if a model carrying `OrgScopedMixin` has no `org_isolation` policy.
+- **No `SET` where `SET LOCAL` belongs.** Tenancy set with session scope would
+  leak to the next request on a pooled connection; a test asserts the
+  `is_local` argument.
 
 ## Progress
 
 - [x] **Phase 0** — foundation, observability, quality gates, versioning policy
-- [ ] Phase 1 — schema, partitioning, RLS and tenancy
+- [x] **Phase 1** — schema, partitioning, RLS and tenancy
 - [ ] Phase 2 — auth, organisations, apps, API keys
 - [ ] Phase 3 — ingest pipeline end to end
 - [ ] Phase 4 — campaigns, links, click tracking

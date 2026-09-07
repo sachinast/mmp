@@ -9,3 +9,7 @@ os.environ.setdefault("MMP_DATABASE_URL", "postgresql+asyncpg://postgres@127.0.0
 os.environ.setdefault("MMP_REDIS_URL", "redis://127.0.0.1:6379/1")
 for var in ("MMP_API_KEY_PEPPER", "MMP_IP_HASH_PEPPER", "MMP_SESSION_SECRET"):
     os.environ.setdefault(var, secrets.token_hex(32))
+
+
+# Database fixtures live in their own module for readability.
+pytest_plugins = ["tests.conftest_db"]

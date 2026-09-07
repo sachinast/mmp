@@ -8,6 +8,7 @@ env:
   MMP_ENVIRONMENT: dev
   MMP_SHUTDOWN_GRACE_SECONDS: "0"
   MMP_DATABASE_URL: postgresql+asyncpg://mmp:mmp@127.0.0.1:5432/mmp_test
+  MMP_TEST_OWNER: mmp
   MMP_REDIS_URL: redis://127.0.0.1:6379/1
 
 jobs:
@@ -45,6 +46,13 @@ jobs:
             echo "MMP_IP_HASH_PEPPER=$(openssl rand -hex 32)"
             echo "MMP_SESSION_SECRET=$(openssl rand -hex 32)"
           } >> "$GITHUB_ENV"
+
+      - name: Migrate the test database
+        env:
+          PGPASSWORD: mmp
+        run: |
+          make migrate
+          psql -h 127.0.0.1 -U mmp -d mmp_test -f infra/scripts/bootstrap_dev_roles.sql
 
       - name: Lint
         run: |
