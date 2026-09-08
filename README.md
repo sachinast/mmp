@@ -91,6 +91,34 @@ comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
 
+## Why the dashboard never queries raw events
+
+On Postgres, rollups are not an optimisation — they are the read path. A
+dashboard querying raw events is fine at ten million rows and unusable at a
+billion, and nobody notices the transition until an advertiser does.
+
+| Rollup | Grain | Cost |
+| --- | --- | --- |
+| `rollup_events_hourly` | event × platform, hourly | cheap |
+| `rollup_clicks_hourly` | campaign × platform, hourly | cheap |
+| `rollup_campaign_daily` | campaign, daily | pays for the events↔attributions join — the query to watch as volume grows |
+
+Buckets are keyed on **`occurred_at`** and scanned by **`received_at`**. That
+distinction is the subtlest thing in the design: an advertiser asking for
+"installs on Tuesday" means installs that *happened* on Tuesday, so a device
+back from a week offline must not appear as a spike today. But the tables are
+partitioned on arrival, which is what bounds a scan. So each refresh scans an
+arrival window, groups by occurrence, and writes only buckets its window covers
+completely — older buckets are left to the nightly late-arrival pass, whose
+window is wide enough to recompute them in full.
+
+Every refresh **recomputes** rather than increments, so running it twice is a
+no-op. The trailing and late-arrival passes cover overlapping windows by design.
+
+Analytics endpoints enforce three things on every request: a **required** date
+range (a default range is a default scan), a 90-day cap, and a Redis cache keyed
+by organisation so a hit cannot cross a tenant.
+
 ## How an install becomes an attribution
 
 Deterministic last-click, in a strict precedence order. There is no
@@ -210,7 +238,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 3** — ingest pipeline end to end
 - [x] **Phase 4** — campaigns, links, click tracking
 - [x] **Phase 5** — attribution and Play Install Referrer
-- [ ] Phase 6 — sessions, rollups, analytics API
+- [x] **Phase 6** — sessions, rollups, analytics API
 - [ ] Phase 7 — dashboard
 - [ ] Phase 8 — React Native SDK
 - [ ] Phase 9 — S2S, postbacks, webhooks

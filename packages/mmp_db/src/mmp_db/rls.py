@@ -99,6 +99,21 @@ def drop_tracker_lookup_sql(table: str) -> list[str]:
     return [f"DROP POLICY IF EXISTS tracker_lookup ON {table}"]
 
 
+def grant_sql(table: str) -> list[str]:
+    """Standard grants for a tenant table.
+
+    Kept here rather than written out in each migration so that the privilege
+    set for a new table is one call and cannot drift — a table granted more than
+    it needs is the kind of thing nobody notices until an audit.
+    """
+    # sql-identifier-ok: table names come from callers' own constants, never
+    # from a request; see the module docstring.
+    return [
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO mmp_api, mmp_worker",
+        f"GRANT SELECT ON {table} TO mmp_readonly",
+    ]
+
+
 def disable_rls_sql(table: str) -> list[str]:
     # sql-identifier-ok: see above.
     return [

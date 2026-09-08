@@ -23,11 +23,16 @@ from mmp_core import configure_logging, get_logger, load_settings
 from mmp_worker.attribution import AttributionConsumer
 from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
+from mmp_worker.rollups import refresh_late_arrivals, refresh_trailing
 
 log = get_logger(__name__)
 
 PARTITION_INTERVAL = 3600.0
 USAGE_INTERVAL = 60.0
+ROLLUP_INTERVAL = 60.0
+# Nightly in effect. Recomputing a week of buckets is not something to do every
+# minute, and the events it catches are days old by definition.
+LATE_ARRIVAL_INTERVAL = 6 * 3600.0
 
 
 def consumer_name() -> str:
@@ -94,6 +99,24 @@ async def run(settings: Settings | None = None) -> None:
         tasks.create_task(
             _every(USAGE_INTERVAL, lambda: refresh_usage(database), name="usage", stop=stop),
             name="usage-rollup",
+        )
+        tasks.create_task(
+            _every(
+                ROLLUP_INTERVAL,
+                lambda: refresh_trailing(database),
+                name="rollups",
+                stop=stop,
+            ),
+            name="rollup-refresh",
+        )
+        tasks.create_task(
+            _every(
+                LATE_ARRIVAL_INTERVAL,
+                lambda: refresh_late_arrivals(database),
+                name="late-arrivals",
+                stop=stop,
+            ),
+            name="late-arrival-refresh",
         )
 
         await stop.wait()

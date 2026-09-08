@@ -20,6 +20,7 @@ from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
     EventBatch,
+    QueuedEvent,
     ValidationFailure,
     validate_event,
 )
@@ -148,6 +149,11 @@ async def ingest_events(request: Request) -> Response:
     except ValidationFailure as exc:
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
+    # Sessions are decided server-side, after validation. The SDK reports
+    # activity; where the boundaries fall is ours to say, or two devices with
+    # different clock behaviour would produce incomparable session counts.
+    await _assign_sessions(state, auth.app_id, queued)
+
     # First idempotency layer: drop client retries before they reach the queue.
     event_ids = [event.event_id for event in queued]
     fresh = await state.idempotency.filter_new(auth.app_id, event_ids)
@@ -182,8 +188,8 @@ async def ingest_events(request: Request) -> Response:
 ADVERTISING_ID_KEYS = ("gaid", "idfa", "advertising_id", "device_id")
 
 
-def _hash_advertising_ids(event: object, *, pepper: str) -> None:
-    properties = event.properties  # type: ignore[attr-defined]
+def _hash_advertising_ids(event: QueuedEvent, *, pepper: str) -> None:
+    properties = event.properties
     if not properties:
         return
     raw = next((properties[key] for key in ADVERTISING_ID_KEYS if properties.get(key)), None)
@@ -194,3 +200,47 @@ def _hash_advertising_ids(event: object, *, pepper: str) -> None:
     digest = hash_device_id(raw, pepper=pepper)
     if digest is not None:
         properties["device_hash"] = digest.hex()
+
+
+# Session assignment.
+#
+# Runs after validation so an invalid batch never touches session state, and
+# before queueing so every event carries its session id downstream. One Redis
+# round trip per distinct device in the batch — a batch is usually one device,
+# so usually one round trip.
+async def _assign_sessions(state: TrackerState, app_id: str, events: list[QueuedEvent]) -> None:
+    """Attach a session id to every event that lacks one.
+
+    Deduplicated by device and resolved in one pipelined round trip. Doing this
+    per event cost a Redis hop each and nearly tripled ingest p50 on a
+    twenty-event batch — caught by the latency gate rather than in review.
+    """
+    needing: dict[str, str] = {}
+    ends: list[QueuedEvent] = []
+
+    for event in events:
+        if event.session_id:
+            # The SDK supplied one. Honoured, because a client that tracks its
+            # own foreground and background transitions knows about boundaries
+            # the server cannot see.
+            continue
+        if event.event_name == "session_end":
+            ends.append(event)
+            continue
+        # First event for this device in the batch decides its session; the
+        # rest join it, which is what belonging to one session means.
+        needing.setdefault(event.anonymous_id, event.event_name)
+
+    if needing:
+        decisions = await state.sessions.resolve_many(app_id=app_id, devices=list(needing.items()))
+        for event in events:
+            if event.session_id or event.event_name == "session_end":
+                continue
+            decision = decisions.get(event.anonymous_id)
+            if decision is not None:
+                event.session_id = str(decision.session_id)
+
+    for event in ends:
+        ended = await state.sessions.end(app_id=app_id, anonymous_id=event.anonymous_id)
+        if ended is not None:
+            event.session_id = str(ended)

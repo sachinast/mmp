@@ -10,7 +10,15 @@ from fastapi.responses import JSONResponse
 from mmp_core.settings import Settings
 
 from mmp_api.context import AppContext
-from mmp_api.routes import apps, attributions, auth, campaigns, keys, organizations
+from mmp_api.routes import (
+    analytics,
+    apps,
+    attributions,
+    auth,
+    campaigns,
+    keys,
+    organizations,
+)
 from mmp_core import (
     HealthRegistry,
     RequestContextMiddleware,
@@ -69,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         keys.router,
         campaigns.router,
         attributions.router,
+        analytics.router,
     ):
         app.include_router(router, prefix="/v1")
 

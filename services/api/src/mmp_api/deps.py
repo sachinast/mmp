@@ -40,6 +40,18 @@ class Principal:
     organization_id: uuid.UUID | None
     role: str | None
 
+    @property
+    def org_id(self) -> uuid.UUID:
+        """The active organisation, for code reached through require_role.
+
+        require_organization has already rejected the request if there is none,
+        so this narrows the Optional without an assert — asserts vanish under -O,
+        and this one guards a tenancy boundary.
+        """
+        if self.organization_id is None:  # pragma: no cover — require_role guarantees it
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "no active organization selected")
+        return self.organization_id
+
     def at_least(self, role: str) -> bool:
         if self.role is None:
             return False
