@@ -216,3 +216,43 @@ async def attribution_consumer(ingest_redis, seeded_app):
         yield consumer
     finally:
         await database.close()
+
+
+@pytest_asyncio.fixture
+async def s2s_key(owner_conn, seeded_app):
+    """An S2S credential and its derived signing secret."""
+    import hmac
+    from hashlib import sha256
+
+    from mmp_core.ids import uuid7
+    from mmp_crypto.keys import generate_key
+
+    settings = seeded_app["settings"]
+    generated = generate_key(environment="prod", pepper=settings.api_key_pepper)
+    await owner_conn.execute(
+        """INSERT INTO api_keys (id, organization_id, app_id, name, kind, key_prefix,
+                                 key_hash, pepper_version, environment, status)
+           VALUES ($1, $2, $3, 's2s', 's2s', $4, $5, 1, 'prod', 'active')""",
+        uuid7(),
+        seeded_app["organization_id"],
+        seeded_app["app_id"],
+        generated.prefix,
+        generated.key_hash,
+    )
+    secret = hmac.new(
+        settings.api_key_pepper.encode("utf-8"),
+        b"s2s-signing:" + generated.key_hash,
+        sha256,
+    ).hexdigest()
+    return {"api_key": generated.raw, "secret": secret}
+
+
+def signed_headers(api_key: str, secret: str, body: bytes, *, path: str = "/v1/s2s/events"):
+    from mmp_crypto.signing import sign
+
+    signature = sign(method="POST", path=path, body=body, secret=secret)
+    return {
+        "authorization": f"Bearer {api_key}",
+        "content-type": "application/json",
+        **signature.headers(),
+    }

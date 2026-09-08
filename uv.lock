@@ -1195,6 +1195,7 @@ name = "mmp-core"
 version = "0.1.0"
 source = { editable = "packages/mmp_core" }
 dependencies = [
+    { name = "httpx" },
     { name = "orjson" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
@@ -1205,6 +1206,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
     { name = "orjson", specifier = ">=3.11" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.12" },
     { name = "pydantic-settings", specifier = ">=2.12" },
@@ -1277,12 +1279,14 @@ source = { editable = "packages/mmp_providers" }
 dependencies = [
     { name = "httpx" },
     { name = "mmp-core" },
+    { name = "mmp-db" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "mmp-core", editable = "packages/mmp_core" },
+    { name = "mmp-db", editable = "packages/mmp_db" },
 ]
 
 [[package]]

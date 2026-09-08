@@ -23,6 +23,7 @@ from mmp_core import configure_logging, get_logger, load_settings
 from mmp_worker.attribution import AttributionConsumer
 from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
+from mmp_worker.postbacks import PostbackConsumer, retry_due
 from mmp_worker.rollups import refresh_late_arrivals, refresh_trailing
 
 log = get_logger(__name__)
@@ -33,6 +34,9 @@ ROLLUP_INTERVAL = 60.0
 # Nightly in effect. Recomputing a week of buckets is not something to do every
 # minute, and the events it catches are days old by definition.
 LATE_ARRIVAL_INTERVAL = 6 * 3600.0
+# The shortest backoff is ~30s, so sweeping every 15s means a retry fires close
+# to when it was due rather than up to a full interval late.
+RETRY_INTERVAL = 15.0
 
 
 def consumer_name() -> str:
@@ -71,6 +75,10 @@ async def run(settings: Settings | None = None) -> None:
     # A third consumer group on the events stream. Independent cursor, so
     # attribution neither waits for persistence nor holds it up.
     attribution = AttributionConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    # Its own consumer group again: a conversion must reach an ad network
+    # promptly, and networks optimise spend on these signals — a late postback
+    # is spend misallocated.
+    postbacks = PostbackConsumer(redis=redis, database=database, consumer_name=consumer_name())
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -87,6 +95,7 @@ async def run(settings: Settings | None = None) -> None:
         tasks.create_task(events.run(), name="event-consumer")
         tasks.create_task(clicks.run(), name="click-consumer")
         tasks.create_task(attribution.run(), name="attribution-consumer")
+        tasks.create_task(postbacks.run(), name="postback-consumer")
         tasks.create_task(
             _every(
                 PARTITION_INTERVAL,
@@ -111,6 +120,15 @@ async def run(settings: Settings | None = None) -> None:
         )
         tasks.create_task(
             _every(
+                RETRY_INTERVAL,
+                lambda: retry_due(database),
+                name="postback-retries",
+                stop=stop,
+            ),
+            name="postback-retry",
+        )
+        tasks.create_task(
+            _every(
                 LATE_ARRIVAL_INTERVAL,
                 lambda: refresh_late_arrivals(database),
                 name="late-arrivals",
@@ -124,6 +142,7 @@ async def run(settings: Settings | None = None) -> None:
         await events.stop()
         await clicks.stop()
         await attribution.stop()
+        await postbacks.stop()
 
     await redis.aclose()
     await database.close()
@@ -132,6 +151,7 @@ async def run(settings: Settings | None = None) -> None:
         events=events.metrics.as_dict(),
         clicks=clicks.metrics.as_dict(),
         attribution=attribution.metrics.as_dict(),
+        postbacks=postbacks.metrics.as_dict(),
     )
 
 

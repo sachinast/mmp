@@ -83,6 +83,26 @@ class TrackerState:
         await self.redis.aclose()
         await self.database.close()
 
+    async def s2s_secret_for(self, auth: object) -> str | None:
+        """The signing secret for an S2S credential.
+
+        Derived from the stored key hash under the server-side pepper rather
+        than held as a second secret: the customer already has the raw key, so
+        both sides can compute this, and there is no additional value to store,
+        rotate or leak. Rotating the key rotates the signing secret with it.
+        """
+        key_hash = getattr(auth, "key_hash", None)
+        if not key_hash:
+            return None
+        import hmac
+        from hashlib import sha256
+
+        return hmac.new(
+            self.settings.api_key_pepper.encode("utf-8"),
+            b"s2s-signing:" + bytes(key_hash),
+            sha256,
+        ).hexdigest()
+
     async def ping_redis(self) -> None:
         await self.redis.ping()
 

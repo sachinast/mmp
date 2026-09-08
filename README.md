@@ -93,6 +93,39 @@ comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
 
+## Sending data out
+
+The postback engine fetches **user-supplied URLs from our servers**, which is
+the sharpest attack surface here. Unguarded, anyone who can create a rule has a
+request forwarder inside the VPC — pointed, above all, at `169.254.169.254`,
+which on a misconfigured instance hands out credentials.
+
+`mmp_core.outbound` closes that: https only, resolve the hostname ourselves,
+reject every returned address in a private/loopback/link-local/metadata range,
+then **connect to the validated IP** with the original `Host` and SNI. That last
+step is what defeats DNS rebinding — a hostname allowlist alone does not,
+because the attacker only has to make the client's own second lookup answer
+differently. Redirects are refused outright; a 302 to an internal address would
+walk past every check above.
+
+Postback templates are **not** rendered by a template engine. Jinja is a
+programming language, and rendering customer-supplied templates with it hands
+anyone who can create a rule server-side template injection and, from there,
+code execution on a worker holding database credentials. `mmp_providers.templates`
+is a fixed allowlist of variable names substituted from a dict, with every value
+URL-encoded. A `{{...}}` that is not a well-formed, allowlisted placeholder is
+rejected when the rule is saved.
+
+Delivery is **claimed before it is attempted** — `UNIQUE (postback_rule_id,
+event_id)` decides the winner, and every other worker walks away. A duplicate
+postback inflates a campaign's apparent performance and, on a cost-per-action
+deal, means paying twice for one action.
+
+S2S conversions are signed over a canonical request (method, path, timestamp,
+body digest) with a nonce cache behind it: a captured request replayed is a
+duplicate conversion sent to an ad network, and a bearer token alone does not
+stop that.
+
 ## The dashboard
 
 Server-rendered Jinja, and deliberately thin: it holds no database connection,
@@ -257,7 +290,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 6** — sessions, rollups, analytics API
 - [x] **Phase 7** — dashboard
 - [ ] Phase 8 — React Native SDK
-- [ ] Phase 9 — S2S, postbacks, webhooks
+- [x] **Phase 9** — S2S, postbacks, webhooks
 - [ ] Phase 10 — reliability and security audit
 - [ ] Phase 11 — privacy, consent, provider framework
 - [ ] Phase 12 — deep links, fraud signals, export
