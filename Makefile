@@ -3,7 +3,7 @@
 PY := uv run
 UVICORN := $(PY) uvicorn --reload --env-file .env
 
-.PHONY: help setup check test lint fmt typecheck security audit sdk sdk-setup \
+.PHONY: help setup check test lint fmt typecheck security audit sdk sdk-setup sdk-ios \
         tracker api web worker db-create db-reset infra-up infra-down
 
 help: ## Show this help
@@ -28,7 +28,7 @@ worker: ## Run the background worker
 	set -a; . ./.env; set +a; $(PY) python -m mmp_worker.main
 
 # ---------------------------------------------------------------- quality
-check: lint typecheck security test sdk ## Everything CI runs
+check: lint typecheck security test sdk sdk-ios ## Everything CI runs
 
 lint: ## Ruff lint + format check
 	$(PY) ruff check .
@@ -65,6 +65,16 @@ sdk: ## Typecheck and test the React Native SDK
 
 sdk-setup: ## Install the SDK's dev dependencies
 	cd $(SDK) && npm install --no-audit --no-fund
+
+sdk-ios: ## Typecheck the iOS native core against the real iOS SDK
+# Only the core, which has no React dependency — the bridge shim needs React
+# headers that exist only after a pod install. Skipped where Xcode is absent.
+	@if xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then \
+	  xcrun --sdk iphoneos swiftc -typecheck -target arm64-apple-ios13.4 \
+	    $(SDK)/ios/MmpIdentifiers.swift && echo "sdk-ios: typecheck clean"; \
+	else \
+	  echo "sdk-ios: skipped (no iOS SDK on this machine)"; \
+	fi
 
 # ---------------------------------------------------------------- data
 db-create: ## Create the local development database

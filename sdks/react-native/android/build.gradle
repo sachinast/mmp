@@ -1,0 +1,39 @@
+// Consumed by the host app through React Native autolinking.
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath("com.android.tools.build:gradle:8.1.1") }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace "com.mmp"
+    compileSdk 34
+
+    defaultConfig {
+        // 21 rather than higher: this is a measurement SDK and raising the
+        // floor would cut a host app off from devices it can otherwise serve.
+        minSdk 21
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies {
+    implementation "com.facebook.react:react-android"
+
+    // Both are `compileOnly` on purpose. A measurement SDK that forces its own
+    // version of Play Services on a host app is a dependency conflict in
+    // someone else's release, and the classes are referenced through a
+    // try/catch that already handles their absence. An app that wants
+    // advertising-ID or install-referrer support adds them itself, which is
+    // also the app declaring that it wants that data collected.
+    compileOnly "com.google.android.gms:play-services-ads-identifier:18.0.1"
+    compileOnly "com.android.installreferrer:installreferrer:2.2"
+}

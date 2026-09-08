@@ -29,6 +29,11 @@ export {
 } from "./storage";
 export { InsecureRandomError } from "./uuid7";
 export type { NativeBridge, DeviceInfo } from "./native";
+export {
+  createNativeBridge,
+  isUsableAdvertisingId,
+  type NativeModuleShape,
+} from "./native-bridge";
 export type {
   ConsentState,
   ConsentUpdate,

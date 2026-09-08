@@ -85,8 +85,8 @@ our uptime.
 
 ## Native module
 
-Four things cannot come from JavaScript. All are optional and the SDK degrades
-without them; supply a `NativeBridge` to enable them:
+Three things cannot come from JavaScript. All are optional and the SDK degrades
+without them.
 
 | Method | Gives you | Without it |
 |---|---|---|
@@ -94,9 +94,79 @@ without them; supply a `NativeBridge` to enable them:
 | `getAdvertisingId()` | GAID / IDFA | No device-match attribution |
 | `getDeviceInfo()` | OS version, model, app version | Those columns are empty |
 
-`getAdvertisingId` **must** return `null` when the user has opted out — ATT
-denied on iOS, or `isLimitAdTrackingEnabled` on Android. The SDK only calls it
-when consent allows, but the platform's own opt-out is the authority.
+Implementations ship in `ios/` and `android/`. Wire them up:
+
+```ts
+import { NativeModules } from "react-native";
+import { MMP, createNativeBridge, adaptKeyValueStore } from "@mmp/react-native";
+
+await MMP.initialize(config, {
+  storage: adaptKeyValueStore(AsyncStorage),
+  native: createNativeBridge(NativeModules.MmpNative),
+});
+```
+
+`createNativeBridge(undefined)` is a supported state — it returns a bridge that
+answers "not available" to everything, which is what a JavaScript-only
+integration looks like.
+
+### iOS
+
+Add to `Info.plist`, or ATT can never be granted:
+
+```xml
+<key>NSUserTrackingUsageDescription</key>
+<string>Explain, in your own words, what the identifier is used for.</string>
+```
+
+**The SDK never presents the ATT prompt.** It can be shown once per install and
+your app owns that moment — after explaining why, somewhere it makes sense. An
+SDK that fires it during `initialize` spends your one chance on a cold launch.
+Call it yourself when you are ready:
+
+```ts
+await NativeModules.MmpNative.requestTrackingAuthorization();
+```
+
+Until it is granted the IDFA is never read at all — not read and withheld.
+
+### Android
+
+Autolinking picks up `MmpPackage`. Play Services and the referrer library are
+`compileOnly` here, so **your app adds whichever it wants**:
+
+```gradle
+implementation "com.google.android.gms:play-services-ads-identifier:18.0.1"
+implementation "com.android.installreferrer:installreferrer:2.2"
+```
+
+They are not forced on you deliberately: an SDK that pins its own Play Services
+version breaks somebody's release, and adding these is also you deciding that
+you want that data collected. The SDK handles their absence.
+
+The `com.google.android.gms.permission.AD_ID` permission is declared by this
+package and is required from Android 13. If you strip it with
+`tools:node="remove"`, the advertising ID reads as all zeros — which looks
+exactly like a user opt-out, so attribution stops silently.
+
+### On opt-outs
+
+Both platforms answer "the user said no" by returning the all-zero UUID rather
+than by failing. The SDK treats that, an empty string, and literal `"null"` as
+no identifier. If you write your own bridge instead of using
+`createNativeBridge`, you must do the same — otherwise every opted-out device
+sends the same value and the server matches them all to each other.
+
+### Verification status
+
+Be aware of what has and has not been run:
+
+- The JavaScript bridge layer is unit-tested (`npm test`).
+- The iOS core is typechecked against the real iOS SDK by `make sdk-ios`.
+- **The Kotlin is not compiled by any tooling in this repo** and neither native
+  half has been executed on a device. Both are additionally covered by static
+  source assertions in `tests/test_sdk_native_contract.py`, which is not the
+  same as running them. Device testing is outstanding work.
 
 ## Two operational notes
 

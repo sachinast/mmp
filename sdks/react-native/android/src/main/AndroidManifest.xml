@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Required from Android 13. Without it the advertising ID reads as all
+      zeros, and the failure is indistinguishable from a user opting out — so
+      an app that strips this with tools:node="remove" will see attribution
+      quietly stop working rather than see an error.
+
+      Declared here rather than left to the host app because the failure is
+      silent. An app that does not want the identifier collected should deny
+      the `advertising` consent purpose, which stops the SDK asking for it at
+      all — that is the switch, not the manifest.
+    -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+</manifest>
