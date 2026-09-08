@@ -143,6 +143,54 @@ class PostbackDelivery(Base, OrgScopedMixin):
     next_retry_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class WebhookDelivery(Base, OrgScopedMixin):
+    """One attempt to deliver one event to one webhook.
+
+    Separate from postback_deliveries rather than sharing a table. They look
+    similar and answer to different people: a postback's shape is dictated by an
+    ad network, a webhook's by us. Sharing storage would mean every schema change
+    for a network's quirk touching the customer-facing contract too.
+
+    The unique constraint carries the same weight as the postback one: an
+    at-least-once queue will redeliver, and a duplicated purchase notification
+    is a duplicated order in whatever system is listening.
+    """
+
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint("webhook_id", "event_id"),
+        CheckConstraint(one_of("status", *DELIVERY_STATUSES), name="status_valid"),
+        Index(
+            "ix_webhook_deliveries_retry",
+            "next_retry_at",
+            postgresql_where="status = 'failed'",
+        ),
+        Index("ix_webhook_deliveries_recent", "webhook_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    organization_id: Mapped[uuid.UUID] = org_fk()
+    webhook_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("webhooks.id", ondelete="CASCADE"), index=True
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+
+    request_url: Mapped[str | None] = mapped_column(Text)
+    request_body: Mapped[str | None] = mapped_column(Text)
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()"
+    )
+    delivered_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Webhook(Base, OrgScopedMixin, TimestampMixin):
     __tablename__ = "webhooks"
 

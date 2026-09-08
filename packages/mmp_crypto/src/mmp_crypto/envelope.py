@@ -121,3 +121,28 @@ def rewrap(sealed: SealedSecret, *, old: MasterKeyProvider, new: MasterKeyProvid
         wrapped_dek=new.wrap(dek),
         key_version=new.current_version,
     )
+
+
+def provider_from_settings(settings: object) -> MasterKeyProvider:
+    """Resolve the credential-wrapping key from configuration.
+
+    Lives here rather than in a service because **both** the API and the worker
+    need it, and they must derive the same key: the API seals a webhook's
+    signing secret, the worker opens it to sign a delivery. If those two ever
+    disagreed, every secret written by one would be undecryptable by the other,
+    and the symptom would be silent delivery failures rather than an error at
+    startup.
+
+    In production this returns a KMS-backed provider (Phase 11). Until then the
+    local provider derives a key from configuration — and refuses to do so
+    outside development, so the weaker path cannot reach production by accident.
+    """
+    from hashlib import sha256
+
+    if getattr(settings, "is_prod", False):
+        raise RuntimeError(
+            "no KMS master key provider configured — refusing to start in production "
+            "with process-local credential encryption"
+        )
+    material = sha256(str(settings.session_secret).encode()).digest()  # type: ignore[attr-defined]
+    return LocalMasterKeyProvider({1: material}, 1)

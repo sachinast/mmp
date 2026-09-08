@@ -21,6 +21,7 @@ import asyncpg
 from mmp_attrib.store import CachedAttribution, lookup
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_db.jsonfields import decode_list
 from mmp_db.pool import Database
 from mmp_db.types import DbConn
 from mmp_ingest.schema import QueuedEvent
@@ -224,7 +225,7 @@ class PostbackConsumer:
             conn,
             delivery_id=delivery_id,
             result=result,
-            success_codes=list(rule["success_status_codes"]),
+            success_codes=decode_list(rule["success_status_codes"]),
             attempt=1,
             request_url=url,
         )
@@ -315,7 +316,7 @@ async def retry_due(database: Database, *, limit: int = 100) -> int:
                 conn,
                 delivery_id=row["id"],
                 result=result,
-                success_codes=list(rule["success_status_codes"]),
+                success_codes=decode_list(rule["success_status_codes"]),
                 attempt=row["attempt_count"],
             )
             retried += 1

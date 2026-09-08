@@ -17,7 +17,13 @@ import ast
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SQL_KEYWORDS = ("select ", "insert ", "update ", "delete ", "where ", "from ", "copy ")
+# SQL *verbs* only, not clause keywords.
+#
+# The first version also matched "from " and "where ", which flagged a Python
+# code sample in a docstring ("from hashlib import sha256"). A clause fragment
+# cannot execute on its own — every statement that can has one of these verbs —
+# so requiring a verb keeps the signal and drops that class of false positive.
+SQL_KEYWORDS = ("select ", "insert into", "update ", "delete from", "copy ")
 SEARCH_DIRS = ("packages", "services")
 
 # The complete list of modules permitted to turn an identifier into SQL text.

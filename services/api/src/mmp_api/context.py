@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from mmp_core.ratelimit import RateLimiter
 from mmp_core.settings import Settings
-from mmp_crypto.envelope import LocalMasterKeyProvider, MasterKeyProvider
+from mmp_crypto.envelope import MasterKeyProvider, provider_from_settings
 from mmp_db.pool import Database
 from redis.asyncio import Redis
 
@@ -53,21 +53,12 @@ class AppContext:
 
 
 def _master_key_provider(settings: Settings) -> MasterKeyProvider:
-    """Resolve the credential-wrapping key.
+    """Kept as a thin alias so existing call sites read naturally.
 
-    In production this returns a KMS-backed provider (Phase 11). Until then the
-    local provider derives a key from configuration — and refuses to do so
-    outside development, so the weaker path cannot reach production by accident.
+    The derivation itself lives in mmp_crypto, shared with the worker — see
+    provider_from_settings for why that matters.
     """
-    if settings.is_prod:
-        raise RuntimeError(
-            "no KMS master key provider configured — refusing to start in production "
-            "with process-local credential encryption"
-        )
-    from hashlib import sha256
-
-    material = sha256(settings.session_secret.encode()).digest()
-    return LocalMasterKeyProvider({1: material}, 1)
+    return provider_from_settings(settings)
 
 
 def redis_url_for_tests() -> str:

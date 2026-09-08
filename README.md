@@ -126,6 +126,19 @@ body digest) with a nonce cache behind it: a captured request replayed is a
 duplicate conversion sent to an ad network, and a bearer token alone does not
 stop that.
 
+Postback rules and webhooks are configured through `/v1/postback-rules` and
+`/v1/webhooks`. Two rules govern both: a bad rule **fails when it is saved**, not
+when it is delivered — an unknown template variable or a destination we refuse
+to reach is a 422 while the user is looking at the form; and credentials are
+**write-only** — a postback's header values and a webhook's signing secret are
+encrypted at rest and never returned, the secret shown exactly once at creation
+alongside the verification code a customer needs to check it.
+
+Webhooks auto-disable after 20 consecutive failures. That is a courtesy to the
+receiver: an endpoint returning 500s for a day is not recovering on its own, and
+retrying into it generates load on a broken system. Any success resets the
+count, so intermittent trouble never accumulates into a disable.
+
 ## The dashboard
 
 Server-rendered Jinja, and deliberately thin: it holds no database connection,

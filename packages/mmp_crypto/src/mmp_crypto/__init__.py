@@ -6,6 +6,7 @@ from mmp_crypto.envelope import (
     SealedSecret,
     open_sealed,
     organization_aad,
+    provider_from_settings,
     rewrap,
     seal,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "open_sealed",
     "organization_aad",
     "parse_key",
+    "provider_from_settings",
     "rewrap",
     "seal",
     "sign",

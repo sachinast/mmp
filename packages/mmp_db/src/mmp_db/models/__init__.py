@@ -8,6 +8,7 @@ from mmp_db.models.distribution import (
     PostbackRule,
     ProviderIntegration,
     Webhook,
+    WebhookDelivery,
 )
 from mmp_db.models.governance import AuditLog, ConsentState, PipelineAudit, UsageRollup
 from mmp_db.models.identity import Organization, OrganizationMember, User
@@ -31,4 +32,5 @@ __all__ = [
     "UsageRollup",
     "User",
     "Webhook",
+    "WebhookDelivery",
 ]

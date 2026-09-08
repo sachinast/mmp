@@ -18,6 +18,8 @@ from mmp_api.routes import (
     campaigns,
     keys,
     organizations,
+    postbacks,
+    webhooks,
 )
 from mmp_core import (
     HealthRegistry,
@@ -78,6 +80,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         campaigns.router,
         attributions.router,
         analytics.router,
+        postbacks.router,
+        webhooks.router,
     ):
         app.include_router(router, prefix="/v1")
 

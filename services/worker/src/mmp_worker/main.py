@@ -16,6 +16,7 @@ import socket
 from collections.abc import Awaitable, Callable
 
 from mmp_core.settings import Settings
+from mmp_crypto.envelope import provider_from_settings
 from mmp_db.pool import Database
 from redis.asyncio import Redis
 
@@ -25,6 +26,7 @@ from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
 from mmp_worker.postbacks import PostbackConsumer, retry_due
 from mmp_worker.rollups import refresh_late_arrivals, refresh_trailing
+from mmp_worker.webhook_sender import WebhookConsumer
 
 log = get_logger(__name__)
 
@@ -79,6 +81,15 @@ async def run(settings: Settings | None = None) -> None:
     # promptly, and networks optimise spend on these signals — a late postback
     # is spend misallocated.
     postbacks = PostbackConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    # Its own group again. A customer's webhook receiver may be a serverless
+    # function someone wrote once and forgot; it must not be able to slow the
+    # delivery of conversions to an ad network.
+    webhooks = WebhookConsumer(
+        redis=redis,
+        database=database,
+        consumer_name=consumer_name(),
+        master_keys=provider_from_settings(settings),
+    )
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -96,6 +107,7 @@ async def run(settings: Settings | None = None) -> None:
         tasks.create_task(clicks.run(), name="click-consumer")
         tasks.create_task(attribution.run(), name="attribution-consumer")
         tasks.create_task(postbacks.run(), name="postback-consumer")
+        tasks.create_task(webhooks.run(), name="webhook-consumer")
         tasks.create_task(
             _every(
                 PARTITION_INTERVAL,
@@ -143,6 +155,7 @@ async def run(settings: Settings | None = None) -> None:
         await clicks.stop()
         await attribution.stop()
         await postbacks.stop()
+        await webhooks.stop()
 
     await redis.aclose()
     await database.close()
@@ -152,6 +165,7 @@ async def run(settings: Settings | None = None) -> None:
         clicks=clicks.metrics.as_dict(),
         attribution=attribution.metrics.as_dict(),
         postbacks=postbacks.metrics.as_dict(),
+        webhooks=webhooks.metrics.as_dict(),
     )
 
 
