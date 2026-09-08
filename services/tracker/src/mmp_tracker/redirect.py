@@ -24,14 +24,17 @@ from __future__ import annotations
 import datetime as dt
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
+from mmp_core.deeplinks import clean_path, is_registered_code
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
 from mmp_core.metrics import redirect_latency, redirects
 from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.clicks import MAX_SUB_PARAM, MAX_USER_AGENT, QueuedClick
+from starlette.datastructures import QueryParams
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
+from mmp_tracker.linkcache import CachedLink
 from mmp_tracker.state import TrackerState
 from mmp_tracker.useragent import Platform, classify, os_version
 
@@ -103,6 +106,36 @@ def build_destination(
     return _with_query(fallback_url, {CLICK_ID_PARAM: click_id})
 
 
+def _resolve_deep_link(
+    state: TrackerState, link: CachedLink, params: QueryParams
+) -> tuple[str | None, str | None]:
+    """Decide the destination this click asked for, from two mutually exclusive
+    forms — see ``mmp_core.deeplinks`` for why a full URL is not one of them.
+
+    ``dl_code`` wins over ``dl`` when both are present. A registered code is the
+    advertiser's own stated intent; a raw path is whoever wrote the link. When
+    they disagree, the advertiser is the one to believe.
+
+    Falls back to the link's own configured path, so a tracking link with a deep
+    link set keeps working with no query parameters at all.
+    """
+    code = params.get("dl_code")
+    if code is not None and is_registered_code(code):
+        target = state.links.deep_link(link.app_id, code)
+        if target is not None:
+            return target.destination, target.fallback_url
+        # A code that does not resolve is dropped rather than passed through as
+        # a path. Honouring it would let anyone turn an unregistered code into
+        # an arbitrary destination simply by naming it.
+        return link.deep_link_path, None
+
+    cleaned = clean_path(params.get("dl"))
+    if cleaned is not None:
+        return cleaned, None
+
+    return link.deep_link_path, None
+
+
 async def redirect_click(request: Request) -> Response:
     import time
 
@@ -131,16 +164,20 @@ async def redirect_click(request: Request) -> Response:
     user_agent = request.headers.get("user-agent")
     platform, is_bot = classify(user_agent)
 
+    params = request.query_params
+    deep_link, deep_fallback = _resolve_deep_link(state, link, params)
+
     destination = build_destination(
         platform=platform,
         android_url=link.android_url,
         ios_url=link.ios_url,
-        fallback_url=link.fallback_url,
+        # A registered code may carry its own web fallback — the page to show
+        # someone who taps a product link on a desktop, or declines the store.
+        fallback_url=deep_fallback or link.fallback_url,
         click_id=click_id,
-        deep_link_path=link.deep_link_path,
+        deep_link_path=deep_link,
     )
 
-    params = request.query_params
     ip = _client_ip(request)
     # Networks sometimes pass the advertising ID on the click. When they do,
     # attribution becomes deterministic on Android without waiting for the
@@ -172,6 +209,7 @@ async def redirect_click(request: Request) -> Response:
         # conversion for a real user; a false positive that flags is a row in a
         # fraud report someone can review.
         is_bot=is_bot,
+        deep_link=deep_link,
     )
 
     dropped = state.click_buffer.append([click])

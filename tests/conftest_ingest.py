@@ -256,3 +256,14 @@ def signed_headers(api_key: str, secret: str, body: bytes, *, path: str = "/v1/s
         "content-type": "application/json",
         **signature.headers(),
     }
+
+
+@pytest.fixture
+async def tracker_links(tracker):
+    """The tracker's live link cache.
+
+    Deep links are cached in-process like tracking links, so a test that inserts
+    one has to resync before the redirect can see it — the same thing
+    LISTEN/NOTIFY does in production.
+    """
+    return tracker._transport.app.state.tracker.links

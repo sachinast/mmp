@@ -68,6 +68,24 @@ WHERE l.status = 'active' AND a.status = 'active'
 """
 
 
+# The advertiser's registry of pre-approved destinations. Loaded whole, for the
+# same reason the links are: the redirect must not query Postgres, and a code
+# that is not in this dict is simply not honoured — there is no fallback lookup,
+# so a flood of invented codes costs nothing.
+LOAD_DEEP_LINKS_SQL = """
+SELECT d.app_id, d.code, d.destination, d.fallback_url
+FROM deep_links d
+JOIN apps a ON a.id = d.app_id
+WHERE a.status = 'active'
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class DeepLinkTarget:
+    destination: str
+    fallback_url: str
+
+
 @dataclass(frozen=True, slots=True)
 class CachedLink:
     """Everything the redirect needs, resolved. Frozen so a handler cannot
@@ -106,6 +124,9 @@ class LinkCache:
     def __init__(self, database: Database, *, resync: dt.timedelta = RESYNC_INTERVAL) -> None:
         self._database = database
         self._links: dict[str, CachedLink] = {}
+        # Keyed by app, because two advertisers may both register "summer" and
+        # one must never resolve to the other's destination.
+        self._deep: dict[tuple[str, str], DeepLinkTarget] = {}
         self._missing: dict[str, dt.datetime] = {}
         self._resync = resync
         self._listener: asyncpg.Connection | None = None
@@ -176,6 +197,7 @@ class LinkCache:
         """
         async with self._database.acquire_raw() as conn:
             rows = await conn.fetch(LOAD_ACTIVE_SQL)
+            deep_rows = await conn.fetch(LOAD_DEEP_LINKS_SQL)
         # Filtered again on `active`, deliberately: the query already excludes
         # disabled links and disabled apps, and this repeats the rule in Python.
         # The redundancy is cheap and it is the layer that caught the bug —
@@ -188,6 +210,12 @@ class LinkCache:
             if link.active:
                 loaded[row["tracking_code"]] = link
         self._links = loaded
+        self._deep = {
+            (str(row["app_id"]), row["code"]): DeepLinkTarget(
+                destination=row["destination"], fallback_url=row["fallback_url"]
+            )
+            for row in deep_rows
+        }
         self._missing.clear()
         self.resyncs += 1
         log.info("linkcache_resynced", links=len(self._links))
@@ -212,6 +240,17 @@ class LinkCache:
     def get(self, tracking_code: str) -> CachedLink | None:
         """The hot path. A dict lookup, nothing else."""
         return self._links.get(tracking_code)
+
+    def deep_link(self, app_id: str, code: str) -> DeepLinkTarget | None:
+        """Resolve a registered code, or nothing.
+
+        No fall-through to the database on a miss, unlike ``get``. A tracking
+        code that is missing is probably a link created seconds ago and worth
+        one query; a deep link code that is missing is far more likely to be
+        someone trying codes, and honouring it would put an attacker in charge
+        of how often we query.
+        """
+        return self._deep.get((app_id, code))
 
     def is_known_missing(self, tracking_code: str, *, now: dt.datetime | None = None) -> bool:
         expiry = self._missing.get(tracking_code)
@@ -244,6 +283,10 @@ class LinkCache:
     @property
     def size(self) -> int:
         return len(self._links)
+
+    @property
+    def deep_link_count(self) -> int:
+        return len(self._deep)
 
 
 async def notify_changed(conn: DbConn, tracking_code: str) -> None:

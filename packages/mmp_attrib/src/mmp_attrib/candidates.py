@@ -33,11 +33,12 @@ MAX_DEVICE_CANDIDATES = 50
 
 CLICK_COLUMNS = """
     click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
-    NULL::text AS source, NULL::text AS medium
+    deep_link, NULL::text AS source, NULL::text AS medium
 """
 
 BY_CLICK_ID_SQL = """
-SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot
+SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
+       deep_link
 FROM clicks
 WHERE click_id = $1
   AND app_id = $2
@@ -46,7 +47,8 @@ WHERE click_id = $1
 """
 
 BY_DEVICE_SQL = """
-SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot
+SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
+       deep_link
 FROM clicks
 WHERE app_id = $1
   AND device_hash = $2
@@ -65,6 +67,7 @@ def _to_click(row: object) -> Click:
         tracking_link_id=row["tracking_link_id"],  # type: ignore[index]
         device_hash=bytes(row["device_hash"]) if row["device_hash"] else None,  # type: ignore[index]
         is_bot=row["is_bot"],  # type: ignore[index]
+        deep_link=row["deep_link"],  # type: ignore[index]
     )
 
 

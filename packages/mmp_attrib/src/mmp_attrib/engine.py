@@ -76,6 +76,10 @@ class Click:
     medium: str | None = None
     device_hash: bytes | None = None
     is_bot: bool = False
+    # The destination this click asked for, already validated at the edge. It
+    # rides along so the attribution can carry it — see the deferred deep link
+    # migration for why the copy is worth making.
+    deep_link: str | None = None
 
 
 @dataclass(frozen=True)

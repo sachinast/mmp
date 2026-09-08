@@ -39,6 +39,7 @@ CLICK_COLUMNS = (
     "sub2",
     "sub3",
     "is_bot",
+    "deep_link",
 )
 
 CREATE_STAGING = sql.create_temp_like(STAGING_TABLE, like="clicks")
@@ -71,6 +72,10 @@ class QueuedClick(msgspec.Struct):
     sub2: str | None
     sub3: str | None
     is_bot: bool
+    # Validated at the edge before it gets here — see mmp_core.deeplinks. What
+    # reaches this struct is either a safe relative path, a destination from the
+    # advertiser's own registry, or nothing.
+    deep_link: str | None = None
     correlation_id: str | None = None
 
 
@@ -93,6 +98,7 @@ def _to_record(click: QueuedClick) -> tuple[object, ...]:
         click.sub2,
         click.sub3,
         click.is_bot,
+        click.deep_link,
     )
 
 

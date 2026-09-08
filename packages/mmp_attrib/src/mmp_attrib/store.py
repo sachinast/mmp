@@ -42,11 +42,11 @@ INSERT INTO attributions (
     id, organization_id, app_id, install_key, anonymous_id, user_id,
     click_id, campaign_id, tracking_link_id, source, medium,
     method, installed_at, attributed_at, window_days, expires_at,
-    fraud_score, fraud_verdict, fraud_rules,
+    fraud_score, fraud_verdict, fraud_rules, deep_link,
     created_at, updated_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $14, $15,
-        $16, $17, $18,
+        $16, $17, $18, $19,
         now(), now())
 ON CONFLICT DO NOTHING
 RETURNING id
@@ -166,6 +166,7 @@ async def record(
             assessment.score,
             str(assessment.verdict),
             json.dumps(assessment.rules) if assessment.signals else None,
+            decision.click.deep_link if decision.click else None,
         )
 
     if inserted is None:
