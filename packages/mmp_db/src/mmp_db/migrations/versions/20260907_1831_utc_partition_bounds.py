@@ -22,7 +22,7 @@ import datetime as dt
 from collections.abc import Sequence
 
 from alembic import op
-from mmp_db.partitions import PARTITION_INDEXES, PartitionSpec, create_partition_sql
+from mmp_db.partitions import PartitionSpec, create_partition_sql
 
 from mmp_db import sql
 
@@ -30,6 +30,12 @@ revision: str = "802dff05d387"
 down_revision: str | None = "b2f02dfa5bbb"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+# The partitioned tables as of this migration, written out rather than read from
+# mmp_db.partitions. Same reasoning as the frozen table lists elsewhere: a
+# migration must keep doing what it did on the day it was written, and that
+# constant is free to grow.
+PARTITIONED_TABLES = ("clicks", "events")
 
 REBUILD_DAYS_BACK = 2
 REBUILD_DAYS_FORWARD = 8
@@ -82,7 +88,7 @@ def upgrade() -> None:
 
     today = dt.datetime.now(dt.UTC).date()
     start = today - dt.timedelta(days=REBUILD_DAYS_BACK)
-    for table in PARTITION_INDEXES:
+    for table in PARTITIONED_TABLES:
         for offset in range(REBUILD_DAYS_BACK + REBUILD_DAYS_FORWARD):
             spec = PartitionSpec(table, start + dt.timedelta(days=offset))
             for statement in create_partition_sql(spec):

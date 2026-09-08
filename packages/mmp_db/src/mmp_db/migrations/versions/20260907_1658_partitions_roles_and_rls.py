@@ -19,14 +19,13 @@ import datetime as dt
 from collections.abc import Sequence
 
 from alembic import op
-from mmp_db.partitions import PARENTS, PartitionSpec, create_partition_sql
+from mmp_db.partitions import PartitionSpec, create_partition_sql
 from mmp_db.rls import (
     GRANTS,
     REVOKE_PUBLIC,
     ROLE_DEFINITIONS,
     disable_rls_sql,
     enable_rls_sql,
-    org_scoped_tables,
 )
 
 revision: str = "514babc412b0"
@@ -36,6 +35,86 @@ depends_on: str | Sequence[str] | None = None
 
 # Enough partitions to cover the migration itself plus the first week of
 # operation. After that the maintenance job keeps a rolling window ahead.
+# The org-scoped tables **as of this migration**, written out rather than derived
+# from the ORM metadata.
+#
+# The first version called org_scoped_tables(), which reads the live models. That
+# makes an applied migration change behaviour as the codebase evolves: adding a
+# WebhookDelivery model four migrations later made *this* one try to enable RLS
+# on a table that would not exist for another four steps. It worked on every
+# database that had migrated incrementally and failed on every fresh one — so it
+# passed locally and would have failed in CI.
+#
+# A migration is a snapshot of an intent at a point in time. It must not ask the
+# present what the past meant.
+# The table definitions as they were when this migration was written. Inlined
+# for the same reason as the table list below: a migration must not ask the
+# present what the past meant, and a DDL constant is free to gain a column.
+PARENTS = (
+    """CREATE TABLE IF NOT EXISTS clicks (
+    click_id          uuid        NOT NULL,
+    clicked_at        timestamptz NOT NULL,
+    organization_id   uuid        NOT NULL,
+    app_id            uuid        NOT NULL,
+    campaign_id       uuid,
+    tracking_link_id  uuid        NOT NULL,
+    device_hash       bytea,
+    ip_hash           bytea,
+    country           char(2),
+    platform          smallint,
+    os_version        text,
+    device_model      text,
+    user_agent        text,
+    sub1              text,
+    sub2              text,
+    sub3              text,
+    is_bot            boolean     NOT NULL DEFAULT false,
+    PRIMARY KEY (clicked_at, click_id)
+) PARTITION BY RANGE (clicked_at);
+    """,
+    """CREATE TABLE IF NOT EXISTS events (
+    event_id        uuid        NOT NULL,
+    received_at     timestamptz NOT NULL,
+    occurred_at     timestamptz NOT NULL,
+    organization_id uuid        NOT NULL,
+    app_id          uuid        NOT NULL,
+    event_name      text        NOT NULL,
+    anonymous_id    text        NOT NULL,
+    user_id         text,
+    session_id      uuid,
+    platform        smallint,
+    os_version      text,
+    app_version     text,
+    device_model    text,
+    country         char(2),
+    ip_hash         bytea,
+    click_id        uuid,
+    revenue_minor   bigint,
+    currency        char(3),
+    clock_skew_ms   bigint,
+    properties      jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (received_at, app_id, event_id)
+) PARTITION BY RANGE (received_at);
+    """,
+)
+
+ORG_SCOPED_TABLES = (
+    "api_keys",
+    "apps",
+    "attributions",
+    "audit_log",
+    "campaigns",
+    "consent_states",
+    "conversion_mappings",
+    "deep_links",
+    "postback_deliveries",
+    "postback_rules",
+    "provider_integrations",
+    "tracking_links",
+    "usage_rollup",
+    "webhooks",
+)
+
 BOOTSTRAP_DAYS_BACK = 2
 BOOTSTRAP_DAYS_FORWARD = 8
 
@@ -56,13 +135,13 @@ def upgrade() -> None:
     op.execute(REVOKE_PUBLIC)
     op.execute(GRANTS)
 
-    for table in org_scoped_tables():
+    for table in ORG_SCOPED_TABLES:
         for statement in enable_rls_sql(table):
             op.execute(statement)
 
 
 def downgrade() -> None:
-    for table in org_scoped_tables():
+    for table in ORG_SCOPED_TABLES:
         for statement in disable_rls_sql(table):
             op.execute(statement)
     op.execute("DROP TABLE IF EXISTS events CASCADE")

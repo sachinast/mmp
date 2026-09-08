@@ -69,6 +69,9 @@ ignore = ["S101"]  # assert is fine in tests; pytest needs it
 # the filesystem from async code. Neither is a concern in a developer tool that
 # never runs in production.
 "infra/load/*.py" = ["ASYNC109", "ASYNC220", "ASYNC240", "S110"]
+# The migration test shells out to createdb/psql/alembic by name, exactly as a
+# developer would. The executables are not attacker-controlled.
+"tests/test_migrations.py" = ["S603", "S607"]
 
 # The single most important lint rule in this repo: no f-string SQL, ever.
 [tool.ruff.lint.flake8-bandit]
@@ -99,6 +102,9 @@ asyncio_mode = "auto"
 testpaths = ["packages", "services", "tests"]
 python_files = ["test_*.py"]
 addopts = "-q --strict-markers"
+markers = [
+    "slow: creates a database and runs the full migration chain",
+]
 
 [build-system]
 requires = ["hatchling"]

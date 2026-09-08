@@ -13,6 +13,16 @@ is the only acceptable default here.
 ``FORCE ROW LEVEL SECURITY`` matters as much as enabling it: without FORCE, the
 table's *owner* bypasses the policy silently, and in development the owner is
 usually whoever ran the migration.
+
+**A note for anyone editing this file.** Migrations import the *functions* here,
+which take their subject as a parameter and therefore mean the same thing
+whenever they run. They must never import the *collections* — ``org_scoped_tables()``
+and friends — because a list that grows changes what an already-applied migration
+does. That is not hypothetical: adding one model once made a four-migrations-old
+RLS step try to secure a table that would not exist for another four steps, which
+worked on every incrementally-migrated database and failed on every fresh one.
+Changing the policy SQL below rewrites history for every migration that calls it,
+so treat it as append-only.
 """
 
 from __future__ import annotations

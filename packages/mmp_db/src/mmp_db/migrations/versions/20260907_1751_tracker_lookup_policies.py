@@ -16,7 +16,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from alembic import op
-from mmp_db.rls import TRACKER_LOOKUP_TABLES, drop_tracker_lookup_sql, tracker_lookup_sql
+from mmp_db.rls import drop_tracker_lookup_sql, tracker_lookup_sql
+
+# Inlined: this list is free to grow, and a migration must keep doing what it
+# did on the day it was written.
+TRACKER_LOOKUP_TABLES = ("api_keys", "apps", "tracking_links")
 
 revision: str = "b2f02dfa5bbb"
 down_revision: str | None = "8afb3aec00cf"

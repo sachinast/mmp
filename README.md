@@ -281,6 +281,11 @@ These are tests, not conventions. They fail the build:
   asserts the key list stays complete.
 - **No placeholder secrets.** Settings reject values starting with `change`,
   `placeholder`, `todo`.
+- **No live metadata in migrations.** A migration must keep doing what it did on
+  the day it was written; importing a list that grows makes an applied migration
+  change behaviour later. A test walks every migration's imports, and a slow test
+  applies the whole chain to a fresh database — the only check that catches a
+  chain which works incrementally and fails from empty.
 - **No tenant table without an RLS policy.** A test walks the ORM metadata and
   fails if a model carrying `OrgScopedMixin` has no `org_isolation` policy.
 - **No `SET` where `SET LOCAL` belongs.** Tenancy set with session scope would
