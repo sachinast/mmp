@@ -91,6 +91,39 @@ comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
 
+## How an install becomes an attribution
+
+Deterministic last-click, in a strict precedence order. There is no
+probabilistic tier: if nothing deterministic matches, the install is organic.
+
+| | Signal | Why it ranks here |
+| --- | --- | --- |
+| 1 | **Referrer** | A click id inside the Play Install Referrer. Ground truth on Android — it comes from Google, survives the install, and cannot be claimed by a competing network. |
+| 2 | **Click ID** | The SDK was handed one through a deferred deep link. Trustworthy, but it passed through the device. |
+| 3 | **Device match** | The same hashed advertising ID at click and at install. Deterministic, but only when the network passed it and the user has not opted out. |
+| 4 | **Organic** | Nothing matched. Not a failure — the honest answer. |
+
+Ties break to the most recent qualifying click. Better evidence arriving late
+(Play's API is queried on first launch and may need a retry) **supersedes**
+rather than overwrites: the old row is kept and pointed at its replacement, so a
+number already reported to an ad network stays reconstructable.
+
+`packages/mmp_attrib/` is pure — `now` and every input are parameters, nothing
+does IO — which is what makes `tests/test_attribution_engine.py` possible: 31
+golden cases with exact expected outcomes, running in 20 ms. Any future change
+to attribution has to declare itself by breaking one of those rather than by
+quietly moving a customer's numbers.
+
+Two things the engine deliberately does **not** do:
+
+- **No fingerprinting.** IP-plus-device-model matching would raise the match
+  rate, is what Apple's rules prohibit for cross-app attribution, and produces
+  attributions that cannot be defended when an advertiser asks how a number was
+  derived.
+- **No blocking on suspected fraud.** An implausibly short click-to-install gap
+  (click injection) is recorded and flagged, and the install is still
+  attributed. Refusing would penalise the advertiser for their attacker.
+
 ## How an event becomes a row
 
 ```
@@ -176,7 +209,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 2** — auth, organisations, apps, API keys
 - [x] **Phase 3** — ingest pipeline end to end
 - [x] **Phase 4** — campaigns, links, click tracking
-- [ ] Phase 5 — attribution and Play Install Referrer
+- [x] **Phase 5** — attribution and Play Install Referrer
 - [ ] Phase 6 — sessions, rollups, analytics API
 - [ ] Phase 7 — dashboard
 - [ ] Phase 8 — React Native SDK

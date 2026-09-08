@@ -16,7 +16,7 @@ import zlib
 import msgspec
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
-from mmp_crypto.pii import hash_ip
+from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
     EventBatch,
@@ -143,6 +143,7 @@ async def ingest_events(request: Request) -> Response:
             # The raw address is used for the digest and then discarded; it is
             # never attached to the queued event or written anywhere.
             event.ip_hash = ip_digest
+            _hash_advertising_ids(event, pepper=state.settings.ip_hash_pepper)
             queued.append(event)
     except ValidationFailure as exc:
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
@@ -170,3 +171,26 @@ async def ingest_events(request: Request) -> Response:
         },
         status_code=202,
     )
+
+
+# Advertising IDs are hashed here, at the edge, and the raw values removed from
+# the payload before it is queued. Attribution needs to compare the identifier
+# seen at click time with the one seen at install time, which a digest supports;
+# it never needs the identifier itself. Doing this at ingest rather than in the
+# worker means the raw value exists only in this process, for the length of one
+# request, and is never written to the queue, the log, or the database.
+ADVERTISING_ID_KEYS = ("gaid", "idfa", "advertising_id", "device_id")
+
+
+def _hash_advertising_ids(event: object, *, pepper: str) -> None:
+    properties = event.properties  # type: ignore[attr-defined]
+    if not properties:
+        return
+    raw = next((properties[key] for key in ADVERTISING_ID_KEYS if properties.get(key)), None)
+    for key in ADVERTISING_ID_KEYS:
+        properties.pop(key, None)
+    if not isinstance(raw, str):
+        return
+    digest = hash_device_id(raw, pepper=pepper)
+    if digest is not None:
+        properties["device_hash"] = digest.hex()

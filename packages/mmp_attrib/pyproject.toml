@@ -2,7 +2,7 @@
 name = "mmp-attrib"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["mmp-core"]
+dependencies = ["msgspec>=0.20", "redis[hiredis]>=5.2,<6", "mmp-core", "mmp-db"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }

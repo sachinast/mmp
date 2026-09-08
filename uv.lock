@@ -1177,10 +1177,18 @@ version = "0.1.0"
 source = { editable = "packages/mmp_attrib" }
 dependencies = [
     { name = "mmp-core" },
+    { name = "mmp-db" },
+    { name = "msgspec" },
+    { name = "redis", extra = ["hiredis"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mmp-core", editable = "packages/mmp_core" }]
+requires-dist = [
+    { name = "mmp-core", editable = "packages/mmp_core" },
+    { name = "mmp-db", editable = "packages/mmp_db" },
+    { name = "msgspec", specifier = ">=0.20" },
+    { name = "redis", extras = ["hiredis"], specifier = ">=5.2,<6" },
+]
 
 [[package]]
 name = "mmp-core"

@@ -14,10 +14,19 @@ from redis.asyncio import Redis
 
 from tests.conftest_api import TEST_REDIS_URL, build_api_settings, build_settings_for
 
+# A different Redis database from the API's.
+#
+# The ingest fixtures flush their database for isolation, and the API stores
+# sessions in Redis — sharing one database meant seeding an ingest fixture
+# silently logged out every API test that ran alongside it. The symptom was a
+# 401 in a test about tenant scoping, which is exactly the kind of misdirection
+# that costs an afternoon.
+INGEST_REDIS_URL = TEST_REDIS_URL.rsplit("/", 1)[0] + "/14"
+
 
 @pytest_asyncio.fixture
 async def ingest_redis() -> AsyncIterator[Redis]:
-    redis = Redis.from_url(TEST_REDIS_URL, decode_responses=False)
+    redis = Redis.from_url(INGEST_REDIS_URL, decode_responses=False)
     try:
         await redis.ping()
     except Exception:
@@ -41,10 +50,10 @@ async def seeded_app(owner_conn, ingest_redis):
     # authenticates as mmp_tracker, the worker writes as mmp_worker.
     settings = build_api_settings()
     tracker_settings = build_settings_for("mmp_tracker").model_copy(
-        update={"api_key_pepper": settings.api_key_pepper}
+        update={"api_key_pepper": settings.api_key_pepper, "redis_url": INGEST_REDIS_URL}
     )
     worker_settings = build_settings_for("mmp_worker").model_copy(
-        update={"api_key_pepper": settings.api_key_pepper}
+        update={"api_key_pepper": settings.api_key_pepper, "redis_url": INGEST_REDIS_URL}
     )
     org_id, app_id, key_id = uuid7(), uuid7(), uuid7()
     suffix = secrets.token_hex(4)
@@ -191,3 +200,19 @@ def sample_event(**overrides) -> dict:
     }
     event.update(overrides)
     return event
+
+
+@pytest_asyncio.fixture
+async def attribution_consumer(ingest_redis, seeded_app):
+    from mmp_db.pool import Database
+    from mmp_worker.attribution import AttributionConsumer
+
+    database = await Database.connect(seeded_app["worker_settings"], role="mmp_worker")
+    consumer = AttributionConsumer(
+        redis=ingest_redis, database=database, consumer_name="test-attrib", idle_sleep=0.01
+    )
+    await consumer.start()
+    try:
+        yield consumer
+    finally:
+        await database.close()

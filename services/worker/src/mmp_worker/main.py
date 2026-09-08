@@ -20,6 +20,7 @@ from mmp_db.pool import Database
 from redis.asyncio import Redis
 
 from mmp_core import configure_logging, get_logger, load_settings
+from mmp_worker.attribution import AttributionConsumer
 from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
 
@@ -62,6 +63,9 @@ async def run(settings: Settings | None = None) -> None:
     # persistence. A late click is a missed attribution for every conversion
     # that follows it.
     clicks = ClickConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    # A third consumer group on the events stream. Independent cursor, so
+    # attribution neither waits for persistence nor holds it up.
+    attribution = AttributionConsumer(redis=redis, database=database, consumer_name=consumer_name())
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -77,6 +81,7 @@ async def run(settings: Settings | None = None) -> None:
     async with asyncio.TaskGroup() as tasks:
         tasks.create_task(events.run(), name="event-consumer")
         tasks.create_task(clicks.run(), name="click-consumer")
+        tasks.create_task(attribution.run(), name="attribution-consumer")
         tasks.create_task(
             _every(
                 PARTITION_INTERVAL,
@@ -95,6 +100,7 @@ async def run(settings: Settings | None = None) -> None:
         log.info("worker_draining")
         await events.stop()
         await clicks.stop()
+        await attribution.stop()
 
     await redis.aclose()
     await database.close()
@@ -102,6 +108,7 @@ async def run(settings: Settings | None = None) -> None:
         "worker_stopped",
         events=events.metrics.as_dict(),
         clicks=clicks.metrics.as_dict(),
+        attribution=attribution.metrics.as_dict(),
     )
 
 
