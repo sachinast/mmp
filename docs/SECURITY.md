@@ -290,7 +290,38 @@ plain log, because someone will rely on it.
 
 ---
 
-## 8. Enforced repository rules
+## 11. Data export
+
+`GET /v1/exports/{events|clicks|attributions}` streams an advertiser's own rows
+as CSV. Three properties matter more than the format.
+
+**Columns are an allowlist, never the table.** `SELECT *` would export whatever
+a future migration adds. Deliberately excluded: `device_hash` and `ip_hash`,
+which are derived from an advertising ID and an IP address under a system-wide
+pepper and are therefore stable pseudonyms for a person — handing one out turns
+an internal attribution key into a join key someone else can re-identify
+against. Also excluded is `user_agent`, a fingerprinting surface with no
+reporting use. The advertiser's own `anonymous_id` and `user_id` *are*
+exported, because those are theirs.
+
+**An export leaves the erasure boundary.** Once a file is downloaded, a later
+deletion request under §8 cannot reach it. This is inherent to exporting data
+at all, not a defect with a fix. It is why exports require the `admin` role
+rather than `member` — taking the dataset out of the system is a different act
+from reading a report — and why every export is written to the audit log before
+a single row is streamed, recording who asked, for which dataset, and over what
+range.
+
+**Bounded.** A 31-day maximum range and a one-million-row cap, both refusals
+rather than truncations: a silently short CSV is worse than a failed one,
+because the recipient cannot tell.
+
+Not done: exports are not encrypted at rest anywhere, because they are never
+written to disk — they stream straight to the caller. If an object-storage
+backend is added for larger exports, it needs its own encryption and expiry
+design, and the audit trail above stops being sufficient on its own.
+
+## 12. Enforced repository rules
 
 Conventions do not survive contact with a deadline. These are tests:
 

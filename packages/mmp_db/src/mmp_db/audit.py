@@ -46,6 +46,7 @@ ACTIONS = frozenset(
         "webhook.created",
         "webhook.deleted",
         "webhook.secret_rotated",
+        "export.requested",
         "deep_link.created",
         "deep_link.deleted",
         "integration.created",
