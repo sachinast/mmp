@@ -20,6 +20,7 @@ back to Postgres. It is never the thing that decides an attribution.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -30,6 +31,7 @@ from mmp_db.types import DbConn
 from redis.asyncio import Redis
 
 from mmp_attrib.engine import Decision, Method, should_supersede
+from mmp_attrib.fraud import Assessment
 
 log = get_logger(__name__)
 
@@ -40,9 +42,11 @@ INSERT INTO attributions (
     id, organization_id, app_id, install_key, anonymous_id, user_id,
     click_id, campaign_id, tracking_link_id, source, medium,
     method, installed_at, attributed_at, window_days, expires_at,
+    fraud_score, fraud_verdict, fraud_rules,
     created_at, updated_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $14, $15,
+        $16, $17, $18,
         now(), now())
 ON CONFLICT DO NOTHING
 RETURNING id
@@ -102,6 +106,7 @@ async def record(
     installed_at: dt.datetime,
     decision: Decision,
     event_window_days: int,
+    assessment: Assessment | None = None,
 ) -> StoredAttribution:
     """Write an attribution, upgrading an existing one if this is better evidence.
 
@@ -112,6 +117,11 @@ async def record(
     """
     key = install_key(app_id, anonymous_id)
     expires_at = installed_at + dt.timedelta(days=event_window_days)
+    # An unassessed install is recorded as clean rather than as unknown. There
+    # is no third state in the schema on purpose: a nullable verdict would mean
+    # every reader had to decide what "not assessed" means, and they would not
+    # all decide the same way.
+    assessment = assessment or Assessment()
 
     async with conn.transaction():
         existing = await conn.fetchrow(CURRENT_SQL, app_id, key)
@@ -153,6 +163,9 @@ async def record(
             installed_at,
             decision.window_days,
             expires_at,
+            assessment.score,
+            str(assessment.verdict),
+            json.dumps(assessment.rules) if assessment.signals else None,
         )
 
     if inserted is None:

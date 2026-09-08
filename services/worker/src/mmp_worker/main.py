@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 import os
 import signal
 import socket
@@ -23,6 +24,7 @@ from redis.asyncio import Redis
 from mmp_core import configure_logging, get_logger, load_settings
 from mmp_worker.attribution import AttributionConsumer
 from mmp_worker.consumers import ClickConsumer, EventConsumer
+from mmp_worker.fraud_sweep import sweep as fraud_sweep
 from mmp_worker.jobs import maintain_partitions, refresh_usage
 from mmp_worker.postbacks import PostbackConsumer, retry_due
 from mmp_worker.reconcile import reconcile
@@ -43,6 +45,10 @@ RETRY_INTERVAL = 15.0
 # Hourly. The job compares completed hours, so running it more often would
 # recompute the same answer.
 RECONCILE_INTERVAL = 3600.0
+# Hourly. The sweep looks at a seven-day window, so its answer barely moves
+# minute to minute — but hourly is fast enough that a network that starts
+# flooding is found within the hour rather than the next day.
+FRAUD_SWEEP_INTERVAL = 3600.0
 
 
 def consumer_name() -> str:
@@ -133,6 +139,15 @@ async def run(settings: Settings | None = None) -> None:
                 stop=stop,
             ),
             name="rollup-refresh",
+        )
+        tasks.create_task(
+            _every(
+                FRAUD_SWEEP_INTERVAL,
+                lambda: fraud_sweep(database, now=dt.datetime.now(dt.UTC)),
+                name="fraud-sweep",
+                stop=stop,
+            ),
+            name="fraud-sweep",
         )
         tasks.create_task(
             _every(

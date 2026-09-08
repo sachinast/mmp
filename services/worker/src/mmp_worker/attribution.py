@@ -20,9 +20,10 @@ import uuid
 from dataclasses import dataclass, field
 
 from mmp_attrib.candidates import load_candidates
+from mmp_attrib.fraud import InstallContext, Verdict, assess_install
 from mmp_attrib.store import link_user, record
 from mmp_core.logging import get_logger
-from mmp_core.metrics import attributions
+from mmp_core.metrics import attributions, fraud_verdicts
 from mmp_db.pool import Database
 from mmp_ingest.schema import QueuedEvent
 from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
@@ -53,6 +54,7 @@ class AttributionMetrics:
     superseded: int = 0
     injections_flagged: int = 0
     by_method: dict[str, int] = field(default_factory=dict)
+    by_verdict: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -62,6 +64,7 @@ class AttributionMetrics:
             "superseded": self.superseded,
             "injections_flagged": self.injections_flagged,
             "by_method": dict(self.by_method),
+            "by_verdict": dict(self.by_verdict),
             # The number a customer notices first. Reported so a drop is visible
             # in the logs before an advertiser reports it to us.
             "match_rate": (round(self.attributed / self.processed, 4) if self.processed else None),
@@ -221,6 +224,17 @@ class AttributionConsumer:
                 referrer_click_id=parsed.click_id,
             )
 
+            # Assessed here rather than in a later sweep because everything
+            # these rules need is already in hand — the winning click and the
+            # gap — so it costs no query, and a verdict that arrives with the
+            # attribution can be acted on before the conversion is paid for.
+            assessment = assess_install(
+                InstallContext(
+                    click_to_install=decision.click_to_install,
+                    click_is_bot=decision.click.is_bot if decision.click else False,
+                )
+            )
+
             stored = await record(
                 conn,
                 self._redis,
@@ -231,6 +245,7 @@ class AttributionConsumer:
                 installed_at=installed_at,
                 decision=decision,
                 event_window_days=event_window,
+                assessment=assessment,
             )
 
         self.metrics.processed += 1
@@ -243,6 +258,22 @@ class AttributionConsumer:
             self.metrics.attributed += 1
         if stored.superseded is not None:
             self.metrics.superseded += 1
+        if assessment.verdict is not Verdict.CLEAN:
+            self.metrics.by_verdict[str(assessment.verdict)] = (
+                self.metrics.by_verdict.get(str(assessment.verdict), 0) + 1
+            )
+            # No tenant label: this counter is scraped by Prometheus, and a
+            # per-organisation label here would put customer cardinality into
+            # a metrics store that keeps it forever.
+            fraud_verdicts.labels(verdict=str(assessment.verdict)).inc()
+            log.warning(
+                "fraud_signals_raised",
+                app_id=event.app_id,
+                verdict=str(assessment.verdict),
+                score=assessment.score,
+                rules=assessment.rules,
+            )
+
         if decision.suspected_injection:
             self.metrics.injections_flagged += 1
             log.warning(

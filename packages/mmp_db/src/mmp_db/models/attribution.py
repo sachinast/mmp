@@ -12,9 +12,10 @@ from sqlalchemy import (
     Index,
     SmallInteger,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mmp_db.base import Base, OrgScopedMixin, TimestampMixin, one_of, org_fk, uuid_pk
@@ -91,6 +92,45 @@ class Attribution(Base, OrgScopedMixin, TimestampMixin):
             initially="DEFERRED",
         ),
     )
+
+    # The fraud assessment of this row. Deliberately not a filter: every read
+    # path returns flagged attributions unless a caller asks otherwise, so a
+    # verdict cannot silently move anybody's numbers.
+    fraud_score: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="0")
+    fraud_verdict: Mapped[str] = mapped_column(String(16), nullable=False, server_default="clean")
+    # The rules that fired, kept so "why was this flagged" can be answered
+    # later without re-running the assessment against inputs that may since
+    # have been erased by a deletion request.
+    fraud_rules: Mapped[list[str] | None] = mapped_column(JSONB)
+
+
+class FraudFinding(Base, OrgScopedMixin, TimestampMixin):
+    """One rule firing on one tracking link over one window.
+
+    Separate from the per-install columns above because this is a property of a
+    population — flooding is not visible in any single install — and because
+    keeping it separate stops a table that grows per install from also carrying
+    per-campaign analysis.
+    """
+
+    __tablename__ = "fraud_findings"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    organization_id: Mapped[uuid.UUID] = org_fk()
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("apps.id", ondelete="CASCADE"), index=True
+    )
+    tracking_link_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    window_start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rule: Mapped[str] = mapped_column(String(40), nullable=False)
+    severity: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # Stored, not regenerated: the thresholds this sentence quotes may have
+    # changed by the time someone reads it, and a finding has to say what it
+    # said when it was made.
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
 
 
 class ConversionMapping(Base, OrgScopedMixin, TimestampMixin):

@@ -104,6 +104,20 @@ attributions = Counter(
     registry=REGISTRY,
 )
 
+# --- fraud --------------------------------------------------------------
+fraud_verdicts = Counter(
+    "mmp_fraud_verdicts_total",
+    "Installs whose fraud assessment was not clean, by verdict.",
+    ["verdict"],  # suspicious | fraudulent — clean is not counted, it is the base rate
+    registry=REGISTRY,
+)
+fraud_findings = Counter(
+    "mmp_fraud_findings_total",
+    "Traffic-level fraud findings written by the sweep, by rule.",
+    ["rule"],  # a closed set from mmp_attrib.fraud.Rule
+    registry=REGISTRY,
+)
+
 # --- outbound -----------------------------------------------------------
 deliveries = Counter(
     "mmp_deliveries_total",

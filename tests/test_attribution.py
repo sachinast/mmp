@@ -7,6 +7,7 @@ import datetime as dt
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pytest
+from mmp_db.jsonfields import decode_list
 
 from tests.conftest_ingest import ANDROID_UA, flush_tracker, sample_event
 
@@ -584,3 +585,46 @@ async def test_summary_is_tenant_scoped(api_client, account, seeded_app):
         f"/v1/attributions/summary?app_id={seeded_app['app_id']}&from=2026-09-01&to=2026-09-08"
     )
     assert response.status_code == 404
+
+
+# ------------------------------------------------------------------- fraud
+async def test_an_install_seconds_after_its_click_is_flagged_on_the_row(
+    tracker, click_consumer, attribution_consumer, owner_conn, seeded_app
+):
+    """The verdict has to reach the database, not just the log.
+
+    This harness clicks and installs milliseconds apart, which is exactly the
+    shape of click injection — a real click-to-install contains a store page
+    load and a download. So the end-to-end path here doubles as the injection
+    case, and asserts the part most likely to be quietly wrong: that the
+    assessment is written to the attribution rather than computed and dropped.
+    """
+    await _click_then_install(tracker, click_consumer, attribution_consumer, seeded_app)
+
+    row = await owner_conn.fetchrow(
+        "SELECT method, fraud_score, fraud_verdict, fraud_rules FROM attributions "
+        "WHERE app_id = $1 AND superseded_by IS NULL",
+        seeded_app["app_id"],
+    )
+    assert row is not None
+    assert row["method"] == "referrer", "the install is still attributed — flag, do not discard"
+    assert row["fraud_verdict"] == "fraudulent"
+    assert row["fraud_score"] >= 100
+    assert "click_injection" in decode_list(row["fraud_rules"])
+
+
+async def test_an_organic_install_is_recorded_clean_not_unknown(
+    tracker, click_consumer, attribution_consumer, owner_conn, seeded_app
+):
+    """There is no third state. An install nothing fired on is clean, and the
+    column is NOT NULL so no reader has to invent a meaning for missing."""
+    await _click_then_install(
+        tracker, click_consumer, attribution_consumer, seeded_app, referrer=False
+    )
+    row = await owner_conn.fetchrow(
+        "SELECT fraud_verdict, fraud_score, fraud_rules FROM attributions WHERE app_id = $1",
+        seeded_app["app_id"],
+    )
+    assert row["fraud_verdict"] == "clean"
+    assert row["fraud_score"] == 0
+    assert row["fraud_rules"] is None, "a clean row stores no rule list to read back"
