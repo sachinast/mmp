@@ -29,6 +29,7 @@ class Network:
     url: str = ""
     received: list[dict] = field(default_factory=list)
     respond_with: int = 200
+    body: str = "ok"
 
 
 @pytest.fixture
@@ -39,9 +40,15 @@ async def network():
 
     async def handle(request: Request) -> Response:
         state.received.append(
-            {"query": dict(parse_qs(request.url.query)), "path": request.url.path}
+            {
+                "query": dict(parse_qs(request.url.query)),
+                "path": request.url.path,
+                "method": request.method,
+                "headers": dict(request.headers),
+                "body": (await request.body()).decode(),
+            }
         )
-        return PlainTextResponse("ok", status_code=state.respond_with)
+        return PlainTextResponse(state.body, status_code=state.respond_with)
 
     app = Starlette(routes=[Route("/conv", handle, methods=["GET", "POST"])])
     config = uvicorn.Config(app, host="127.0.0.1", port=8978, log_level="error")
@@ -330,3 +337,200 @@ async def test_a_due_retry_is_re_sent(
     )
     assert delivery["status"] == "delivered"
     assert delivery["attempt_count"] == 2
+
+
+# --- delivery through a provider adapter --------------------------------
+async def _integration_rule(owner_conn, seeded_app, network, master_keys, **settings):
+    """A postback rule bound to an s2s_json integration."""
+    import msgspec
+    from mmp_core.ids import uuid7
+    from mmp_crypto.envelope import organization_aad, seal
+
+    config = {"endpoint": network.url, **settings}
+    sealed = seal(
+        msgspec.json.encode({"api_token": "tok-123"}),
+        provider=master_keys,
+        aad=organization_aad(seeded_app["organization_id"]),
+    )
+    integration_id, rule_id = uuid7(), uuid7()
+
+    await owner_conn.execute(
+        """INSERT INTO provider_integrations (id, organization_id, provider, name,
+               credentials_ciphertext, credentials_nonce, wrapped_dek, key_version,
+               configuration, status, created_at, updated_at)
+           VALUES ($1, $2, 's2s_json', 'Network', $3, $4, $5, 1, $6::jsonb,
+                   'active', now(), now())""",
+        integration_id,
+        seeded_app["organization_id"],
+        sealed.ciphertext,
+        sealed.nonce,
+        sealed.wrapped_dek,
+        json.dumps(config),
+    )
+    await owner_conn.execute(
+        """INSERT INTO postback_rules (id, organization_id, app_id,
+               provider_integration_id, name, trigger_event, method, url_template,
+               success_status_codes, requires_attribution, is_sandbox, enabled,
+               created_at, updated_at)
+           VALUES ($1, $2, $3, $4, 'Via adapter', 'purchase', 'POST', $5,
+                   '[200]'::jsonb, false, false, true, now(), now())""",
+        rule_id,
+        seeded_app["organization_id"],
+        seeded_app["app_id"],
+        integration_id,
+        network.url,
+    )
+    return rule_id
+
+
+async def _run_with_keys(seeded_app, ingest_redis, rounds: int = 4):
+    from mmp_crypto.kms import provider_from_settings
+    from mmp_db.pool import Database
+    from mmp_worker.postbacks import PostbackConsumer
+
+    database = await Database.connect(seeded_app["worker_settings"], role="mmp_worker")
+    try:
+        consumer = PostbackConsumer(
+            redis=ingest_redis,
+            database=database,
+            consumer_name="test-adapter",
+            idle_sleep=0.01,
+            master_keys=provider_from_settings(seeded_app["worker_settings"]),
+        )
+        await consumer.start()
+        for _ in range(rounds):
+            if await consumer.run_once() == 0:
+                break
+        return consumer
+    finally:
+        await database.close()
+
+
+async def test_an_adapter_builds_and_sends_the_conversion(
+    tracker, ingest_redis, owner_conn, seeded_app, network, allow_loopback
+):
+    """The whole framework, end to end: credentials unsealed, event name
+    translated, JSON body posted, response read."""
+    from mmp_crypto.kms import provider_from_settings
+
+    await _integration_rule(
+        owner_conn,
+        seeded_app,
+        network,
+        provider_from_settings(seeded_app["worker_settings"]),
+    )
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(
+                    event_name="purchase",
+                    anonymous_id="adapter-dev",
+                    revenue_minor=3499,
+                    currency="USD",
+                )
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    await _run_with_keys(seeded_app, ingest_redis)
+
+    assert network.received, "the adapter's request should have been sent"
+    sent = network.received[0]
+    assert sent["method"] == "POST"
+    assert sent["headers"]["authorization"] == "Bearer tok-123", (
+        "credentials must be unsealed and applied"
+    )
+    payload = json.loads(sent["body"])
+    assert payload["event_name"] == "purchase"
+    assert payload["value"] == "34.99", "major units, as every network's macro expects"
+    assert payload["currency"] == "USD"
+
+
+async def test_an_unmapped_event_is_skipped_not_failed(
+    tracker, ingest_redis, owner_conn, seeded_app, network, allow_loopback
+):
+    """An event this integration was not configured to send is skipped quietly
+    rather than attempted and recorded as a failure."""
+    from mmp_crypto.kms import provider_from_settings
+
+    rule_id = await _integration_rule(
+        owner_conn,
+        seeded_app,
+        network,
+        provider_from_settings(seeded_app["worker_settings"]),
+        event_map={"install": "app_install"},  # purchase deliberately absent
+    )
+    await owner_conn.execute(
+        "UPDATE postback_rules SET trigger_event = 'purchase' WHERE id = $1", rule_id
+    )
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(
+                    event_name="purchase",
+                    anonymous_id="unmapped-dev",
+                    revenue_minor=100,
+                    currency="USD",
+                )
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    consumer = await _run_with_keys(seeded_app, ingest_redis)
+
+    assert not network.received, "an unmapped event must not be sent"
+    assert consumer.metrics.skipped_unmapped >= 1
+
+
+async def test_a_success_code_carrying_an_error_is_recorded_as_a_failure(
+    tracker, ingest_redis, owner_conn, seeded_app, network, allow_loopback
+):
+    """The reason the adapter reads the body.
+
+    A provider returning 200 with {"error": ...} is a rejection wearing a
+    success code, and recording it as delivered is how an advertiser spends a
+    month believing conversions are arriving.
+    """
+    from mmp_crypto.kms import provider_from_settings
+
+    network.respond_with = 200
+    network.body = json.dumps({"error": "unknown campaign"})
+
+    rule_id = await _integration_rule(
+        owner_conn,
+        seeded_app,
+        network,
+        provider_from_settings(seeded_app["worker_settings"]),
+    )
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(
+                    event_name="purchase",
+                    anonymous_id="rejected-dev",
+                    revenue_minor=100,
+                    currency="USD",
+                )
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    await _run_with_keys(seeded_app, ingest_redis)
+
+    assert network.received, "the request was made"
+    delivery = await owner_conn.fetchrow(
+        "SELECT status, response_status, error FROM postback_deliveries "
+        "WHERE postback_rule_id = $1",
+        rule_id,
+    )
+    assert delivery["response_status"] == 200
+    assert delivery["status"] != "delivered", (
+        "a 200 carrying an error must not be recorded as a delivery"
+    )
+    assert "unknown campaign" in (delivery["error"] or "")

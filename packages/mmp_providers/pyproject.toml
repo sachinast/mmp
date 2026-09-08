@@ -2,7 +2,7 @@
 name = "mmp-providers"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.28", "mmp-core", "mmp-db"]
+dependencies = ["httpx>=0.28", "mmp-core", "mmp-db", "mmp-ingest"]
 
 [tool.uv.sources]
 mmp-core = { workspace = true }

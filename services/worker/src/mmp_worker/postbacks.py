@@ -21,14 +21,19 @@ import asyncpg
 from mmp_attrib.store import CachedAttribution, lookup
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_crypto.envelope import MasterKeyProvider
+from mmp_db.jsonfields import decode as decode_json
 from mmp_db.jsonfields import decode_list
 from mmp_db.pool import Database
 from mmp_db.types import DbConn
 from mmp_ingest.schema import QueuedEvent
 from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
-from mmp_providers.delivery import claim, record, send
+from mmp_providers.base import PreparedRequest, Provider, ProviderConfig
+from mmp_providers.delivery import DeliveryResult, claim, record, send
 from mmp_providers.templates import render, variables_from
 from redis.asyncio import Redis
+
+from mmp_providers import registry
 
 log = get_logger(__name__)
 
@@ -36,8 +41,12 @@ POSTBACK_GROUP = "postback-sender"
 
 RULES_SQL = """
 SELECT r.id, r.method, r.url_template, r.body_template, r.success_status_codes,
-       r.requires_attribution, r.is_sandbox, r.organization_id
+       r.requires_attribution, r.is_sandbox, r.organization_id,
+       i.provider, i.credentials_ciphertext, i.credentials_nonce, i.wrapped_dek,
+       i.configuration
 FROM postback_rules r
+LEFT JOIN provider_integrations i ON i.id = r.provider_integration_id
+                                 AND i.status = 'active'
 WHERE r.app_id = $1 AND r.trigger_event = $2 AND r.enabled
 """
 
@@ -54,6 +63,7 @@ class PostbackMetrics:
     delivered: int = 0
     failed: int = 0
     skipped_unattributed: int = 0
+    skipped_unmapped: int = 0
     blocked: int = 0
     by_status: dict[str, int] = field(default_factory=dict)
 
@@ -63,6 +73,7 @@ class PostbackMetrics:
             "delivered": self.delivered,
             "failed": self.failed,
             "skipped_unattributed": self.skipped_unattributed,
+            "skipped_unmapped": self.skipped_unmapped,
             "blocked": self.blocked,
             "by_status": dict(self.by_status),
         }
@@ -78,12 +89,16 @@ class PostbackConsumer:
         batch_size: int = 200,
         idle_sleep: float = 0.1,
         sandbox_endpoint: str = SANDBOX_ENDPOINT,
+        master_keys: MasterKeyProvider | None = None,
     ) -> None:
         self._redis = redis
         self._database = database
         self._batch_size = batch_size
         self._idle_sleep = idle_sleep
         self._sandbox_endpoint = sandbox_endpoint
+        self._master_keys = master_keys
+        self._provider: Provider | None = None
+        registry.load_builtin_once()
         self._consumer: StreamConsumer[QueuedEvent] = StreamConsumer(
             redis,
             stream=EVENTS_STREAM,
@@ -176,6 +191,88 @@ class PostbackConsumer:
             for rule in rules:
                 await self._deliver(conn, rule, event, context, attribution)
 
+    def _prepare(
+        self, rule: asyncpg.Record, event: QueuedEvent, context: dict[str, object]
+    ) -> PreparedRequest | None:
+        """Build the request, through an adapter when the rule names one.
+
+        A rule with no provider integration is the plain URL-template path that
+        existed before adapters, and stays supported: most affiliate networks
+        are exactly that, and requiring an integration record for them would be
+        ceremony without benefit.
+        """
+        self._provider = None
+
+        provider_name = rule.get("provider")
+        if not provider_name:
+            return PreparedRequest(
+                method=rule["method"],
+                url=render(rule["url_template"], context),
+                headers=({"content-type": "application/json"} if rule["body_template"] else {}),
+                body=(
+                    render(rule["body_template"], context, encode=False).encode()
+                    if rule["body_template"]
+                    else None
+                ),
+                success_codes=tuple(decode_list(rule["success_status_codes"])),
+            )
+
+        try:
+            provider = registry.get(provider_name)
+        except registry.UnknownProvider:
+            # An integration naming an adapter this build does not have. Logged
+            # loudly: it means a configuration outlived a deployment.
+            log.error(
+                "postback_provider_unknown",
+                provider=provider_name,
+                rule_id=str(rule["id"]),
+            )
+            return None
+
+        self._provider = provider
+        config = self._config_for(rule)
+        if config is None:
+            return None
+        return provider.prepare(event_name=event.event_name, context=context, config=config)
+
+    def _config_for(self, rule: asyncpg.Record) -> ProviderConfig | None:
+        """Unseal an integration's credentials for one delivery."""
+        import msgspec
+        from mmp_crypto.envelope import SealedSecret, open_sealed, organization_aad
+
+        if not rule["credentials_ciphertext"]:
+            return ProviderConfig(settings=decode_json(rule["configuration"]) or {})
+        if self._master_keys is None:
+            # Sealed credentials with no key provider to open them. This is a
+            # deployment fault, not a per-conversion one, so it is worth being
+            # loud about rather than silently degrading every integration on
+            # this worker to unauthenticated requests that will all be rejected.
+            raise RuntimeError(
+                "postback worker has sealed provider credentials but no master "
+                "key provider; check the worker's KMS configuration"
+            )
+        try:
+            plaintext = open_sealed(
+                SealedSecret(
+                    ciphertext=bytes(rule["credentials_ciphertext"]),
+                    nonce=bytes(rule["credentials_nonce"]),
+                    wrapped_dek=bytes(rule["wrapped_dek"]),
+                    key_version=1,
+                ),
+                provider=self._master_keys,
+                aad=organization_aad(rule["organization_id"]),
+            )
+        except Exception:
+            # Without credentials the request cannot be authenticated, and an
+            # unauthenticated one would be rejected anyway. Better to skip and
+            # say why than to send something that cannot work.
+            log.exception("provider_credentials_undecryptable", rule_id=str(rule["id"]))
+            return None
+        return ProviderConfig(
+            credentials=msgspec.json.decode(plaintext, type=dict[str, str]),
+            settings=decode_json(rule["configuration"]) or {},
+        )
+
     async def _deliver(
         self,
         conn: DbConn,
@@ -207,27 +304,64 @@ class PostbackConsumer:
             return
 
         sandbox = rule["is_sandbox"]
-        url = self._sandbox_endpoint if sandbox else render(rule["url_template"], context)
-        body = (
-            render(rule["body_template"], context, encode=False).encode()
-            if rule["body_template"]
-            else None
-        )
 
+        # The adapter describes the request; the engine sends it. That split is
+        # what keeps the SSRF guard, the delivery claim and the retry policy
+        # outside any provider's reach.
+        prepared = self._prepare(rule, event, context)
+        if prepared is None:
+            # The provider does not accept this event. Recorded and abandoned
+            # rather than retried: it will not become acceptable later.
+            await record(
+                conn,
+                delivery_id=delivery_id,
+                result=DeliveryResult(
+                    delivered=False,
+                    status_code=None,
+                    body=None,
+                    error="blocked: provider does not accept this event",
+                ),
+                success_codes=[],
+                attempt=1,
+            )
+            self.metrics.skipped_unmapped += 1
+            return
+
+        url = self._sandbox_endpoint if sandbox else prepared.url
         result = await send(
             url=url,
-            method=rule["method"],
-            headers={"content-type": "application/json"} if body else None,
-            body=body,
+            method=prepared.method,
+            headers=prepared.headers or None,
+            body=prepared.body,
             allow_http=sandbox,
         )
+
+        # A provider returning 200 with an error in the body is a rejection
+        # wearing a success code. Recording it as delivered is how an advertiser
+        # spends a month believing conversions are arriving.
+        accepted: bool | None = None
+        if result.status_code is not None and self._provider is not None:
+            verdict = self._provider.interpret(
+                status_code=result.status_code, body=result.body or ""
+            )
+            accepted = verdict.accepted
+            if not verdict.accepted:
+                result = DeliveryResult(
+                    delivered=False,
+                    status_code=result.status_code,
+                    body=result.body,
+                    error=verdict.detail or "provider rejected the conversion",
+                    elapsed_ms=result.elapsed_ms,
+                )
+
         status = await record(
             conn,
             delivery_id=delivery_id,
             result=result,
-            success_codes=decode_list(rule["success_status_codes"]),
+            success_codes=list(prepared.success_codes),
             attempt=1,
             request_url=url,
+            accepted=accepted,
         )
 
         self.metrics.by_status[status] = self.metrics.by_status.get(status, 0) + 1

@@ -1282,6 +1282,7 @@ dependencies = [
     { name = "httpx" },
     { name = "mmp-core" },
     { name = "mmp-db" },
+    { name = "mmp-ingest" },
 ]
 
 [package.metadata]
@@ -1289,6 +1290,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "mmp-core", editable = "packages/mmp_core" },
     { name = "mmp-db", editable = "packages/mmp_db" },
+    { name = "mmp-ingest", editable = "packages/mmp_ingest" },
 ]
 
 [[package]]

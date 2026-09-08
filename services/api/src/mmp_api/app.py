@@ -16,6 +16,7 @@ from mmp_api.routes import (
     attributions,
     auth,
     campaigns,
+    integrations,
     keys,
     organizations,
     postbacks,
@@ -84,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         postbacks.router,
         webhooks.router,
         privacy.router,
+        integrations.router,
     ):
         app.include_router(router, prefix="/v1")
 

@@ -184,9 +184,17 @@ async def record(
     success_codes: list[int],
     attempt: int,
     request_url: str | None = None,
+    accepted: bool | None = None,
 ) -> str:
-    """Write the outcome and decide what happens next."""
-    delivered = result.status_code in success_codes
+    """Write the outcome and decide what happens next.
+
+    ``accepted`` is the adapter's reading of the response, and it wins over the
+    status code when supplied. Without it the adapter's ``interpret`` would be
+    decorative: a provider returning 200 with an error in the body would be
+    recorded as delivered because 200 is in the success list, which is exactly
+    the case that method exists to catch.
+    """
+    delivered = accepted if accepted is not None else result.status_code in success_codes
 
     if delivered:
         status = "delivered"
