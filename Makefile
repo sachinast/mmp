@@ -3,7 +3,7 @@
 PY := uv run
 UVICORN := $(PY) uvicorn --reload --env-file .env
 
-.PHONY: help setup check test lint fmt typecheck security audit \
+.PHONY: help setup check test lint fmt typecheck security audit sdk sdk-setup \
         tracker api web worker db-create db-reset infra-up infra-down
 
 help: ## Show this help
@@ -28,7 +28,7 @@ worker: ## Run the background worker
 	set -a; . ./.env; set +a; $(PY) python -m mmp_worker.main
 
 # ---------------------------------------------------------------- quality
-check: lint typecheck security test ## Everything CI runs
+check: lint typecheck security test sdk ## Everything CI runs
 
 lint: ## Ruff lint + format check
 	$(PY) ruff check .
@@ -51,6 +51,20 @@ audit: ## Dependency CVE scan against the lockfile
 
 test: ## Run the test suite
 	$(PY) pytest
+
+SDK := sdks/react-native
+
+sdk: ## Typecheck and test the React Native SDK
+# Skipped rather than failed when node_modules is absent, so a Python-only
+# checkout still runs `make check`. CI installs them, so CI runs it for real.
+	@if [ -d $(SDK)/node_modules ]; then \
+	  cd $(SDK) && npm run --silent typecheck && npm run --silent test; \
+	else \
+	  echo "sdk: skipped (run 'make sdk-setup' to install its dev dependencies)"; \
+	fi
+
+sdk-setup: ## Install the SDK's dev dependencies
+	cd $(SDK) && npm install --no-audit --no-fund
 
 # ---------------------------------------------------------------- data
 db-create: ## Create the local development database

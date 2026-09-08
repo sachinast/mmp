@@ -1,0 +1,25 @@
+{
+  "name": "@mmp/react-native",
+  "version": "0.1.0",
+  "description": "Mobile measurement SDK for React Native",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src tests --max-warnings 0"
+  },
+  "peerDependencies": {
+    "react-native": ">=0.72"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
