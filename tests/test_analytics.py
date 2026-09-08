@@ -215,3 +215,42 @@ async def test_limits_are_bounded(account, limit):
         f"/v1/analytics/events?app_id={app['id']}&{_range()}&limit={limit}"
     )
     assert response.status_code == 422
+
+
+async def test_device_counts_are_not_claimed_to_be_period_distinct(account):
+    """A distinct count cannot be aggregated across buckets.
+
+    Summing double-counts every device active in two hours; taking the maximum
+    reports the busiest single hour. Neither is "unique devices this week", and
+    the field is named for what the rollup can actually answer. Found by looking
+    at the rendered page — 570 installs from 12 devices is arithmetically
+    impossible, and no assertion in this file had caught it.
+    """
+    app = await _app(account, name="Distinct App", package="com.example.distinct")
+    response = await account.client.get(f"/v1/analytics/overview?app_id={app['id']}&{_range()}")
+    assert response.status_code == 200
+    totals = response.json()["totals"]
+    assert "peak_hourly_devices" in totals
+    assert "unique_devices" not in totals, (
+        "the API must not offer a period-level distinct count it cannot compute"
+    )
+
+    events = await account.client.get(f"/v1/analytics/events?app_id={app['id']}&{_range()}")
+    assert events.status_code == 200
+
+
+def test_cache_keys_carry_a_schema_version():
+    """Cached values outlive deploys.
+
+    Renaming a response field and shipping it meant the new code read old cache
+    entries and failed validation on every request until the TTL expired — five
+    minutes of 500s across the dashboard from a rename that looked entirely
+    safe. It happened here, in development, and the version in the key is why it
+    cannot happen in production.
+    """
+    import uuid
+
+    from mmp_api.routes.analytics import CACHE_SCHEMA_VERSION, _cache_key
+
+    key = _cache_key(uuid.uuid4(), "overview", uuid.uuid4(), "2026-09-01", "2026-09-08")
+    assert f":v{CACHE_SCHEMA_VERSION}:" in key

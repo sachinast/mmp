@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Apps · MMP{% endblock %}
+{% block content %}
+<h1>Apps</h1>
+<p class="sub">Every app in this organisation, with its attribution configuration.</p>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not apps %}
+  <div class="card">
+    {% with title = "No apps yet",
+            hint = "An app is the container for your tracking links, events and attributions." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Platform</th><th>Identifier</th><th>Status</th>
+          <th class="num">Install window</th><th class="num">Event window</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for app in apps %}
+          <tr>
+            <td>{{ app.name }}</td>
+            <td>{{ app.platform }}</td>
+            <td><code>{{ app.android_package_name or app.ios_bundle_id or "—" }}</code></td>
+            <td><span class="pill {{ app.status }}">{{ app.status }}</span></td>
+            <td class="num">{{ app.install_window_days }}d</td>
+            <td class="num">{{ app.event_window_days }}d</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

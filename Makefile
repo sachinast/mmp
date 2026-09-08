@@ -92,3 +92,7 @@ bench: ## Latency regression gate against the recorded baseline
 bench-baseline: ## Re-record the latency baseline
 	$(PY) python infra/load/ingest_benchmark.py --requests 800 --batch 20 \
 	  --concurrency 8 --update-baseline
+
+.PHONY: dev-stack
+dev-stack: ## Run the API and the dashboard together (for local browsing)
+	./infra/scripts/dev_stack.sh

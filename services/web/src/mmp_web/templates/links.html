@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Tracking links · MMP{% endblock %}
+{% block content %}
+<h1>Tracking links</h1>
+<p class="sub">The URLs you give to networks. Each click through one is recorded and attributable.</p>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not links %}
+  <div class="card">
+    {% with title = "No tracking links yet",
+            hint = "Create a campaign, then a link, and hand its URL to your ad network." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Link</th><th>Destinations</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for link in links %}
+          <tr>
+            <td>{{ link.name }}</td>
+            {# Shown in full, because the whole point of this page is copying it
+               somewhere else. #}
+            <td><code>{{ tracking_domain }}/c/{{ link.tracking_code }}</code></td>
+            <td>
+              {% if link.android_url %}<div class="meta">Android</div>{% endif %}
+              {% if link.ios_url %}<div class="meta">iOS</div>{% endif %}
+              <div class="meta">Fallback</div>
+            </td>
+            <td><span class="pill {{ link.status }}">{{ link.status }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

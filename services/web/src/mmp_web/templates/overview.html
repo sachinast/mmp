@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Overview · MMP{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<p class="sub">Campaign performance for the selected app and period.</p>
+
+{% include "partials/controls.html" %}
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not apps %}
+  {% with title = "No apps yet",
+          hint = "Register an app to start tracking installs and events." %}
+    {% include "partials/empty.html" %}
+  {% endwith %}
+{% else %}
+  <div class="grid cols-4">
+    {% for stat in stats %}
+      <div class="card stat">
+        <div class="label">{{ stat.label }}</div>
+        {# A rate with no denominator is undefined, not zero. Showing 0% would
+           read as "nobody converted" rather than "nobody clicked". #}
+        <div class="value {% if stat.value is none %}none{% endif %}">
+          {{ stat.display }}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h2>Daily volume</h2>
+  <div class="card">
+    {% if series %}
+      {{ chart | safe }}
+    {% else %}
+      {% with title = "Nothing in this period",
+              hint = "Try a wider date range, or check that the SDK is sending events." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    {% endif %}
+  </div>
+
+  <h2>Campaigns</h2>
+  {% if campaigns %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Campaign</th><th class="num">Clicks</th><th class="num">Installs</th>
+            <th class="num">Install rate</th><th class="num">Conversions</th>
+            <th class="num">Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in campaigns %}
+            <tr>
+              <td>{{ row.campaign_name or "—" }}</td>
+              <td class="num">{{ "{:,}".format(row.clicks) }}</td>
+              <td class="num">{{ "{:,}".format(row.installs) }}</td>
+              <td class="num">{{ row.install_rate_display }}</td>
+              <td class="num">{{ "{:,}".format(row.conversions) }}</td>
+              <td class="num">{{ row.revenue_display }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card">
+      {% with title = "No campaign activity",
+              hint = "Campaigns appear here once a tracking link receives clicks." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% endif %}
+
+  <p class="meta">
+    Read from pre-aggregated rollups{% if cache_state %} · cache {{ cache_state }}{% endif %}.
+    Numbers are bucketed by when events happened, not when they arrived.
+  </p>
+{% endif %}
+{% endblock %}

@@ -38,6 +38,15 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 MAX_RANGE_DAYS = 90
 CACHE_TTL = 300
+
+# Bump when the shape of any cached response changes.
+#
+# Cached values outlive deploys. Renaming a field and shipping it means the new
+# code reads old entries and fails validation on every request until the TTL
+# expires — five minutes of 500s across the dashboard, caused by a rename that
+# looked entirely safe. Including a version in the key makes a shape change miss
+# the old entries instead of choking on them.
+CACHE_SCHEMA_VERSION = 2
 MAX_EXPLORER_ROWS = 1000
 
 
@@ -46,7 +55,9 @@ class Totals(BaseModel):
     installs: int
     sessions: int
     events: int
-    unique_devices: int
+    # Named for what the rollup can actually answer. A period-level distinct
+    # count is not derivable from per-hour distinct counts.
+    peak_hourly_devices: int
     revenue_minor: int
     conversions: int
     install_rate: float | None
@@ -72,7 +83,7 @@ class CampaignRow(BaseModel):
 class EventRow(BaseModel):
     event_name: str
     event_count: int
-    unique_devices: int
+    peak_hourly_devices: int
     revenue_minor: int
 
 
@@ -97,7 +108,7 @@ def _cache_key(organization_id: uuid.UUID, name: str, *parts: object) -> str:
     forgot its filter.
     """
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode("utf-8")).hexdigest()[:32]
-    return f"analytics:{organization_id}:{name}:{digest}"
+    return f"analytics:v{CACHE_SCHEMA_VERSION}:{organization_id}:{name}:{digest}"
 
 
 async def _cached(
@@ -119,7 +130,9 @@ SELECT
     coalesce(sum(event_count) FILTER (WHERE event_name = 'install'), 0)::bigint AS installs,
     coalesce(sum(event_count) FILTER (WHERE event_name = 'session_start'), 0)::bigint
         AS sessions,
-    coalesce(max(unique_devices), 0)::bigint AS unique_devices,
+    -- The busiest hour's distinct devices, not the period's. Distinct counts
+    -- cannot be aggregated across buckets; named for what it actually is.
+    coalesce(max(unique_devices), 0)::bigint AS peak_hourly_devices,
     coalesce(sum(revenue_minor), 0)::bigint AS revenue_minor,
     coalesce(sum(event_count) FILTER (WHERE revenue_minor > 0), 0)::bigint AS conversions
 FROM rollup_events_hourly
@@ -164,7 +177,7 @@ EVENTS_SQL = """
 SELECT
     event_name,
     sum(event_count)::bigint AS event_count,
-    max(unique_devices)::bigint AS unique_devices,
+    max(unique_devices)::bigint AS peak_hourly_devices,
     sum(revenue_minor)::bigint AS revenue_minor
 FROM rollup_events_hourly
 WHERE app_id = $1 AND bucket_hour >= $2 AND bucket_hour < $3
@@ -211,7 +224,7 @@ async def overview(
                 "installs": installs,
                 "sessions": events["sessions"],
                 "events": events["events"],
-                "unique_devices": events["unique_devices"],
+                "peak_hourly_devices": events["peak_hourly_devices"],
                 "revenue_minor": events["revenue_minor"],
                 "conversions": events["conversions"],
                 # None rather than zero when there were no clicks: a rate with

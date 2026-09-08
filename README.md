@@ -31,10 +31,12 @@ failure, not a runtime surprise.
 ## Running
 
 ```bash
-make tracker   # :8001  event ingestion and click redirects
-make api       # :8002  auth, orgs, apps, campaigns, analytics
-make web       # :8003  dashboard
-make worker    #        background processing
+make tracker    # :8001  event ingestion and click redirects
+make api        # :8002  auth, orgs, apps, campaigns, analytics
+make web        # :8003  dashboard
+make worker     #        background processing
+
+make dev-stack  # API + dashboard together, for browsing at :8003
 ```
 
 Every HTTP service answers `/health` (is the process alive) and `/ready` (should
@@ -90,6 +92,20 @@ On Android the click id travels inside the Play Store `referrer` parameter and
 comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
+
+## The dashboard
+
+Server-rendered Jinja, and deliberately thin: it holds no database connection,
+no business logic and no service credentials. Every page is the result of
+calling the API **as the signed-in user**, forwarding their own session cookie,
+so it cannot surface anything that user could not fetch themselves. A template
+bug cannot become a tenancy bug, because the tenancy decision was never made
+there.
+
+Everything it loads is inline — no CDN, no external stylesheet, no bundler —
+which is why its Content-Security-Policy can be `default-src 'none'`. Charts are
+server-rendered SVG. A dashboard that loads third-party JavaScript is one
+compromised CDN away from exfiltrating tenant data.
 
 ## Why the dashboard never queries raw events
 
@@ -239,7 +255,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 4** — campaigns, links, click tracking
 - [x] **Phase 5** — attribution and Play Install Referrer
 - [x] **Phase 6** — sessions, rollups, analytics API
-- [ ] Phase 7 — dashboard
+- [x] **Phase 7** — dashboard
 - [ ] Phase 8 — React Native SDK
 - [ ] Phase 9 — S2S, postbacks, webhooks
 - [ ] Phase 10 — reliability and security audit

@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     ip_hash_pepper: str = Field(min_length=32)
     session_secret: str = Field(min_length=32)
 
+    # --- service topology ------------------------------------------------
+    # Where the dashboard finds the API, and the domain that appears in the
+    # tracking links it shows people. Both are display/wiring concerns, so a
+    # wrong value is a broken page rather than a security problem — but a
+    # missing one should still fail at boot rather than at first click.
+    api_base_url: str = "http://127.0.0.1:8002"
+    tracking_domain: str = "https://track.example.com"
+
     # --- observability --------------------------------------------------
     shutdown_grace_seconds: float = Field(default=5.0, ge=0.0)
 

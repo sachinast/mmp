@@ -1,0 +1,24 @@
+{# App and date-range selector. A plain GET form: the state lives in the URL, so
+   a dashboard view can be bookmarked and pasted into a conversation — which is
+   how people actually share a number they are worried about. #}
+<form class="inline card" method="get" style="margin-bottom:18px">
+  <div>
+    <label for="app_id">App</label>
+    <select id="app_id" name="app_id">
+      {% for app in apps %}
+        <option value="{{ app.id }}" {% if app.id == selected_app_id %}selected{% endif %}>
+          {{ app.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="from">From</label>
+    <input id="from" name="from" type="date" value="{{ from_date }}">
+  </div>
+  <div>
+    <label for="to">To</label>
+    <input id="to" name="to" type="date" value="{{ to_date }}">
+  </div>
+  <button type="submit">Apply</button>
+</form>

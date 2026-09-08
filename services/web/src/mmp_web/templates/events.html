@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Events · MMP{% endblock %}
+{% block content %}
+<h1>Events</h1>
+<p class="sub">Event volume by name, over the selected period.</p>
+
+{% include "partials/controls.html" %}
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not events %}
+  <div class="card">
+    {% with title = "No events in this period",
+            hint = "Check that the SDK is initialised and the API key matches this environment." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Event</th><th class="num">Count</th>
+          {# Not "unique devices for the period" — that is not derivable from
+             per-hour distinct counts, and claiming it would be a number that is
+             confidently wrong. #}
+          <th class="num">Peak hourly devices</th><th class="num">Revenue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in events %}
+          <tr>
+            <td><code>{{ row.event_name }}</code></td>
+            <td class="num">{{ "{:,}".format(row.event_count) }}</td>
+            <td class="num">{{ "{:,}".format(row.peak_hourly_devices) }}</td>
+            <td class="num">{{ row.revenue_display }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">
+    Peak hourly devices is the busiest single hour in the period, not a distinct
+    count across it — distinct counts cannot be summed across buckets.
+  </p>
+{% endif %}
+{% endblock %}

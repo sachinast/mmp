@@ -27,6 +27,17 @@ safe to re-run for a window that received late data. An incrementing counter is
 none of those, and a counter that double-counts after a restart becomes an
 invoice dispute.
 
+**Distinct counts do not aggregate.** ``unique_devices`` is exact *within its
+own hour* and means nothing when summed or maxed across hours: summing
+double-counts every device active in two hours, and taking the maximum reports
+the busiest single hour. There is no arithmetic that recovers a period-level
+distinct count from per-bucket distinct counts — that needs either a scan of the
+raw events or a mergeable sketch (HyperLogLog), and neither belongs in the
+default read path. So the analytics API exposes this as *peak hourly devices*
+and says so. Reporting it as "unique devices for the week" would be a number
+that is confidently, silently wrong, which is the worst thing a measurement
+product can produce.
+
 **Buckets are keyed on ``occurred_at``, scanned by ``received_at``.** That
 distinction is the subtlest thing in this module and it is worth stating plainly.
 
@@ -55,6 +66,8 @@ CREATE TABLE IF NOT EXISTS rollup_events_hourly (
     event_name      text        NOT NULL,
     platform        smallint    NOT NULL DEFAULT 0,
     event_count     bigint      NOT NULL DEFAULT 0,
+    -- Distinct devices *within this hour*. Deliberately not summable or
+    -- maxable into a period total: see the note on distinct counts below.
     unique_devices  bigint      NOT NULL DEFAULT 0,
     revenue_minor   bigint      NOT NULL DEFAULT 0,
     updated_at      timestamptz NOT NULL DEFAULT now(),

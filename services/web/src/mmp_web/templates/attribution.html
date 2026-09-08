@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Attribution · MMP{% endblock %}
+{% block content %}
+<h1>Attribution</h1>
+<p class="sub">How installs were credited, and why.</p>
+
+{% include "partials/controls.html" %}
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% else %}
+  <div class="grid cols-4">
+    <div class="card stat">
+      <div class="label">Installs</div>
+      <div class="value">{{ "{:,}".format(summary.total) }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Attributed</div>
+      <div class="value">{{ "{:,}".format(summary.attributed) }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Organic</div>
+      <div class="value">{{ "{:,}".format(summary.organic) }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Match rate</div>
+      <div class="value {% if summary.match_rate is none %}none{% endif %}">
+        {{ match_rate_display }}
+      </div>
+    </div>
+  </div>
+
+  <h2>By method</h2>
+  {% if summary.by_method %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>What it means</th><th class="num">Installs</th></tr></thead>
+        <tbody>
+          {% for row in summary.by_method %}
+            <tr>
+              <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
+              <td class="meta">{{ method_notes[row.method] }}</td>
+              <td class="num">{{ "{:,}".format(row.count) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card">
+      {% with title = "No installs in this period",
+              hint = "Attribution appears once installs arrive with a referrer or a matching device." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% endif %}
+
+  <h2>Look up a device</h2>
+  <form class="inline card" method="get">
+    <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+    <input type="hidden" name="from" value="{{ from_date }}">
+    <input type="hidden" name="to" value="{{ to_date }}">
+    <div style="flex:1; min-width:240px">
+      <label for="anonymous_id">Anonymous ID</label>
+      <input id="anonymous_id" name="anonymous_id" value="{{ anonymous_id or '' }}"
+             placeholder="the device identifier from the SDK">
+    </div>
+    <button type="submit">Look up</button>
+  </form>
+
+  {% if anonymous_id %}
+    {% if device_history %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Method</th><th>Campaign</th><th>Installed</th><th>Window</th><th>State</th></tr>
+          </thead>
+          <tbody>
+            {% for row in device_history %}
+              <tr>
+                <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
+                <td><code>{{ row.campaign_id or "—" }}</code></td>
+                <td class="meta">{{ row.installed_at }}</td>
+                <td class="num">{{ row.window_days }}d</td>
+                {# Superseded rows are shown, not hidden. "It used to say organic
+                   and now it says Meta" has to be answerable from the record. #}
+                <td>{% if row.superseded_by %}<span class="pill">superseded</span>
+                    {% else %}<span class="pill active">current</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card">
+        {% with title = "No attribution for that device",
+                hint = "Either the install has not arrived yet, or the identifier does not match." %}
+          {% include "partials/empty.html" %}
+        {% endwith %}
+      </div>
+    {% endif %}
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,121 @@
+{# The shell. Everything is inline: no CDN, no external stylesheet, no bundler.
+
+   That is a deliberate constraint, not a shortcut. A dashboard that loads
+   third-party JavaScript is a dashboard whose tenant data is one compromised
+   CDN away from an exfiltration, and the Content-Security-Policy below can be
+   strict precisely because there is nothing external to allow. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}MMP{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #0f1216; --surface: #171b21; --surface-2: #1e242b;
+      --border: #2a323b; --text: #e6ebf0; --muted: #8b98a5;
+      --accent: #4f9cf9; --good: #46b978; --warn: #d9a441; --bad: #e56b62;
+      --radius: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    nav {
+      display: flex; align-items: center; gap: 4px; padding: 10px 20px;
+      border-bottom: 1px solid var(--border); background: var(--surface);
+      flex-wrap: wrap;
+    }
+    nav .brand { font-weight: 700; margin-right: 14px; color: var(--accent); }
+    nav a.item { color: var(--muted); padding: 5px 10px; border-radius: var(--radius); }
+    nav a.item:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+    nav a.item.active { background: var(--surface-2); color: var(--text); }
+    nav .spacer { flex: 1; }
+    nav .who { color: var(--muted); font-size: 13px; }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    h2 { font-size: 15px; margin: 28px 0 10px; }
+    .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
+    .card { background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 16px; }
+    .grid { display: grid; gap: 12px; }
+    .cols-4 { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+    .cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase;
+                   letter-spacing: .5px; }
+    .stat .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;
+                   margin-top: 4px; }
+    .stat .value.none { color: var(--muted); font-size: 20px; font-weight: 400; }
+    table { width: 100%; border-collapse: collapse; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border);
+                  border-radius: var(--radius); background: var(--surface); }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+         color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--border);
+         background: var(--surface-2); white-space: nowrap; }
+    td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pill { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 10px;
+            border: 1px solid var(--border); color: var(--muted); }
+    .pill.active { color: var(--good); border-color: var(--good); }
+    .pill.disabled { color: var(--muted); }
+    .pill.referrer { color: var(--good); border-color: var(--good); }
+    .pill.click_id { color: var(--accent); border-color: var(--accent); }
+    .pill.device_match { color: var(--warn); border-color: var(--warn); }
+    .pill.organic { color: var(--muted); }
+    .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+    .empty strong { display: block; color: var(--text); margin-bottom: 6px; }
+    .error { border-left: 3px solid var(--bad); background: var(--surface);
+             padding: 14px 16px; border-radius: var(--radius); margin-bottom: 16px; }
+    .error strong { color: var(--bad); }
+    form.inline { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input, select {
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+      padding: 7px 9px; border-radius: var(--radius); font-size: 13px; font-family: inherit;
+    }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button {
+      background: var(--accent); color: #06121f; border: 0; padding: 8px 14px;
+      border-radius: var(--radius); font-weight: 600; font-size: 13px; cursor: pointer;
+      font-family: inherit;
+    }
+    button.secondary { background: var(--surface-2); color: var(--text);
+                       border: 1px solid var(--border); }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+           background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+    /* preserveAspectRatio="none" scales glyphs with the geometry, so the SVG
+       holds no text at all — the labels below are HTML and stay legible. */
+    .chart { display: block; width: 100%; height: 160px; }
+    .chart-peak { color: var(--muted); font-size: 11px;
+                  font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+    .chart-axis { display: flex; justify-content: space-between;
+                  color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .htmx-request .loading { display: block; }
+    .loading { display: none; color: var(--muted); font-size: 12px; padding: 8px 0; }
+    .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+{% if user %}
+<nav>
+  <span class="brand">MMP</span>
+  {% for item in nav_items %}
+    <a class="item {% if item.key == active %}active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+  {% endfor %}
+  <span class="spacer"></span>
+  <span class="who">{{ organization.name if organization else '' }} · {{ user.email }}</span>
+  <form method="post" action="/logout" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="secondary" type="submit">Sign out</button>
+  </form>
+</nav>
+{% endif %}
+<main>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
