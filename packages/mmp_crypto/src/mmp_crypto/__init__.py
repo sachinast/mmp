@@ -11,6 +11,8 @@ from mmp_crypto.envelope import (
     seal,
 )
 from mmp_crypto.keys import GeneratedKey, ParsedKey, generate_key, parse_key, verify_key
+from mmp_crypto.kms import KmsError, KmsMasterKeyProvider
+from mmp_crypto.kms import provider_from_settings as master_key_provider
 from mmp_crypto.passwords import (
     PasswordPolicyError,
     hash_password,
@@ -36,6 +38,8 @@ __all__ = [
     "SIGNATURE_HEADER",
     "TIMESTAMP_HEADER",
     "GeneratedKey",
+    "KmsError",
+    "KmsMasterKeyProvider",
     "LocalMasterKeyProvider",
     "MasterKeyProvider",
     "ParsedKey",
@@ -47,6 +51,7 @@ __all__ = [
     "hash_device_id",
     "hash_ip",
     "hash_password",
+    "master_key_provider",
     "needs_rehash",
     "nonce_for",
     "open_sealed",

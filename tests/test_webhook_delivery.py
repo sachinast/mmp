@@ -101,7 +101,7 @@ async def _webhook_row(owner_conn, seeded_app, context, url: str, events: list[s
 
 
 async def _consumer(seeded_app, ingest_redis, database):
-    from mmp_crypto.envelope import provider_from_settings
+    from mmp_crypto.kms import provider_from_settings
     from mmp_worker.webhook_sender import WebhookConsumer
 
     consumer = WebhookConsumer(
@@ -121,7 +121,7 @@ async def test_a_purchase_reaches_the_receiver_signed(
     import hmac
     from hashlib import sha256
 
-    from mmp_crypto.envelope import provider_from_settings
+    from mmp_crypto.kms import provider_from_settings
     from mmp_db.pool import Database
 
     from mmp_core import outbound
@@ -187,7 +187,7 @@ async def test_a_purchase_reaches_the_receiver_signed(
 async def test_only_subscribed_events_are_delivered(
     tracker, ingest_redis, owner_conn, seeded_app, receiver, monkeypatch
 ):
-    from mmp_crypto.envelope import provider_from_settings
+    from mmp_crypto.kms import provider_from_settings
     from mmp_db.pool import Database
 
     from mmp_core import outbound
@@ -227,7 +227,7 @@ async def test_a_redelivered_event_is_not_sent_twice(
 ):
     """A duplicated purchase notification is a duplicated order in whatever
     system is listening."""
-    from mmp_crypto.envelope import provider_from_settings
+    from mmp_crypto.kms import provider_from_settings
     from mmp_db.pool import Database
     from mmp_ingest.stream import EVENTS_STREAM
     from mmp_worker.webhook_sender import WEBHOOK_GROUP
@@ -282,7 +282,7 @@ async def test_repeated_failures_disable_the_webhook(
     Continuing to retry into it generates load on a broken system and a backlog
     we would have to drain later.
     """
-    from mmp_crypto.envelope import provider_from_settings
+    from mmp_crypto.kms import provider_from_settings
     from mmp_db.pool import Database
     from mmp_providers.webhooks import MAX_CONSECUTIVE_FAILURES
 

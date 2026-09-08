@@ -37,6 +37,7 @@ class AuthRecord(msgspec.Struct):
     kind: str
     key_hash: bytes
     app_status: str
+    consent_mode: str = "permissive"
 
 
 class AuthError(Exception):
@@ -51,7 +52,8 @@ _encoder = msgspec.msgpack.Encoder()
 _decoder = msgspec.msgpack.Decoder(AuthRecord)
 
 LOOKUP_SQL = """
-SELECT k.app_id, k.organization_id, k.environment, k.kind, k.key_hash, a.status AS app_status
+SELECT k.app_id, k.organization_id, k.environment, k.kind, k.key_hash,
+       a.status AS app_status, a.consent_mode
 FROM api_keys k
 JOIN apps a ON a.id = k.app_id
 WHERE k.key_prefix = $1 AND k.status = 'active'
@@ -113,6 +115,7 @@ class KeyAuthenticator:
             kind=row["kind"],
             key_hash=bytes(row["key_hash"]),
             app_status=row["app_status"],
+            consent_mode=row["consent_mode"],
         )
         await self._redis.set(cache_key, _encoder.encode(record), ex=int(CACHE_TTL.total_seconds()))
         return record

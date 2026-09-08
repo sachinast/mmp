@@ -9,6 +9,7 @@ from mmp_core.ratelimit import RateLimit, RateLimiter
 from mmp_core.settings import Settings
 from mmp_db.pool import Database
 from mmp_ingest.audit import AcceptedCounter
+from mmp_ingest.consent import ConsentGate
 from mmp_ingest.dedup import IdempotencyWindow
 from mmp_ingest.sessions import SessionTracker
 from mmp_ingest.stream import CLICKS_STREAM, EVENTS_STREAM, StreamProducer
@@ -40,6 +41,7 @@ class TrackerState:
     links: LinkCache
     sessions: SessionTracker
     accepted_counter: AcceptedCounter
+    consent: ConsentGate
     ingest_limit: RateLimit = field(default=DEFAULT_INGEST_LIMIT)
     accepted_total: int = 0
     clicks_total: int = 0
@@ -76,6 +78,7 @@ class TrackerState:
             links=links,
             sessions=SessionTracker(redis),
             accepted_counter=AcceptedCounter(redis),
+            consent=ConsentGate(redis),
         )
 
     async def close(self) -> None:

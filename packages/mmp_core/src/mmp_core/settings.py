@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     ip_hash_pepper: str = Field(min_length=32)
     session_secret: str = Field(min_length=32)
 
+    # --- key management ---------------------------------------------------
+    # Required in production. Without it, credential wrapping uses a key derived
+    # from configuration and held in the same process as the data it protects —
+    # which is the property KMS exists to provide. The check is enforced where
+    # the provider is constructed, not left to a deployment checklist.
+    kms_key_id: str | None = None
+    kms_region: str | None = None
+
     # --- service topology ------------------------------------------------
     # Where the dashboard finds the API, and the domain that appears in the
     # tracking links it shows people. Both are display/wiring concerns, so a

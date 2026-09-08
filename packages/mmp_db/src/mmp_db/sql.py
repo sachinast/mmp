@@ -79,6 +79,17 @@ def drop_table(table: str, *, if_exists: bool = True) -> str:
     return f"DROP TABLE {clause}{identifier(table)}"
 
 
+def delete_where(table: str, predicate: str) -> str:
+    """A DELETE against a validated table with a literal predicate.
+
+    The predicate is written by us and must contain only bind placeholders — the
+    table name is what this validates. Used by the erasure job, where the table
+    list is a module constant.
+    """
+    # sql-identifier-ok: see module docstring.
+    return f"DELETE FROM {identifier(table)} WHERE {predicate}"  # noqa: S608 # nosec B608
+
+
 def truncate(table: str) -> str:
     # sql-identifier-ok: see module docstring.
     return f"TRUNCATE {identifier(table)}"

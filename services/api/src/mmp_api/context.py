@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 from mmp_core.ratelimit import RateLimiter
 from mmp_core.settings import Settings
-from mmp_crypto.envelope import MasterKeyProvider, provider_from_settings
+from mmp_crypto.envelope import MasterKeyProvider
+from mmp_crypto.kms import provider_from_settings
 from mmp_db.pool import Database
 from redis.asyncio import Redis
 

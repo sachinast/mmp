@@ -91,10 +91,26 @@ columns; that is worth doing and is not done.
 - Postback header values are write-only: encrypted at rest, only names returned.
 - A test asserts the raw key never reaches the database, a log line, or a repr.
 
-**Open:** `provider_from_settings` derives the credential-wrapping key from
-configuration and refuses to run in production. A real KMS provider is a Phase 11
-deliverable. **The platform cannot be deployed to production until it exists** —
-this is enforced at startup, not left to discipline.
+**KMS.** `mmp_crypto.kms` wraps data keys with a customer master key held in
+KMS. `seal` generates the data key locally and asks KMS only to wrap it, so the
+plaintext key never travels to AWS and the local development provider remains a
+faithful stand-in rather than a different code path.
+
+Unwrapped data keys are cached in memory, bounded by size and age. That is a real
+trade-off: a revoked grant takes up to the TTL to take effect, and plaintext data
+keys sit in process memory for that long. `clear_cache()` exists so an incident
+response does not require a restart. The alternative — a KMS call per webhook
+delivery — would add tens of milliseconds and a per-request bill to the outbound
+path.
+
+Production **requires** `MMP_KMS_KEY_ID`. The check lives where the provider is
+constructed, not in a checklist: a control that depends on someone remembering is
+not a control.
+
+**Untested against real AWS.** The KMS tests use a stand-in client and prove this
+module's own logic — caching, encryption context, version handling, error
+containment. They prove nothing about whether the boto3 call shape is right. The
+first real deployment is the first time that is tested.
 
 ---
 
@@ -186,7 +202,74 @@ an attacker which half of their forgery to work on.
 
 ---
 
-## 7. Privacy
+## 7. Consent
+
+Consent is evaluated **at the edge, before anything is stored**. Checked after
+persistence it becomes a deletion problem: the data is already in a partition, a
+rollup, a postback and a partner's system. Checked at ingest, a denied purpose
+means the field never existed.
+
+Purposes are separable — analytics, attribution, advertising — because a user may
+allow us to count that an install happened and refuse to have it attributed to an
+ad network. Forwarding to a third party requires *both* attribution and
+advertising: sending a conversion to a network is an advertising use of an
+attribution, and someone who allowed one but not the other has not agreed to it.
+
+**An explicit denial is always honoured**, in any configuration. What "unknown"
+means is per-app and explicit:
+
+| Mode | Unknown consent |
+| --- | --- |
+| `permissive` (default) | proceeds |
+| `strict` | denies |
+
+The default is permissive **not** because it is safer — it is not — but because
+strict-by-default would silently stop attributing every existing advertiser's
+installs the moment this shipped, which is a data loss event wearing a privacy
+feature's clothes. Strict is one field away and is the correct setting for an app
+serving users in a consent jurisdiction. Making it the default is a commercial
+decision and belongs to whoever owns that.
+
+## 8. Erasure
+
+A deletion request is the one privacy operation that cannot be partially done.
+Erasing events but leaving attributions produces a system that reports having
+deleted data it still holds — worse than not deleting, because it is a claim.
+
+`mmp_db.erasure` enumerates every table explicitly, and a test walks the schema:
+a new table carrying an `anonymous_id` fails until someone has decided what
+erasure means for it.
+
+Two deliberate exclusions, both stated in the code:
+
+- **Aggregate rollups** are left alone. A row saying "412 installs this hour"
+  contains no identifier, and recomputing history to subtract one person would
+  corrupt reporting an advertiser has already acted on while achieving nothing
+  for the individual.
+- **Clicks are de-identified rather than deleted.** Deleting one would change a
+  click count for a period already billed and already reported; clearing the
+  device hash, IP hash and user agent removes the link to a person while leaving
+  the fact that a click happened.
+
+Requests and completions are both written to the audit log, so a partial failure
+is visible rather than reported as success.
+
+## 9. The audit log
+
+Hash-chained: each entry carries the hash of its predecessor, so editing one
+breaks the chain for everything after it. `/v1/privacy/audit/verify` walks it.
+
+**Tamper-evident, not tamper-proof**, and the API says so in every response.
+Anyone who can write to the table can rewrite the chain from the point they
+altered; detecting that needs the chain head recorded somewhere they cannot
+reach, which is a deployment concern and is not done. Concurrent writers can also
+fork the chain — edits are still detected, but the ordering is not total.
+Serialising every audit write would put a lock on every mutation in the platform.
+
+A log described as tamper-proof when it is only tamper-evident is worse than a
+plain log, because someone will rely on it.
+
+## 10. Privacy
 
 - **Raw IP addresses are never stored.** Hashed with HMAC under a pepper that
   rotates **daily**, which caps correlation to a single day — including for us.
@@ -231,9 +314,16 @@ hash-pinned lockfile.
 Stated plainly, because a security document that only lists strengths is
 marketing.
 
-- **No KMS.** Credential wrapping is process-local and refuses to start in
-  production. Required before any real deployment.
+- **KMS is untested against real AWS.** The integration is implemented and
+  covered against a stand-in client; the call shape is unverified.
 - **Identity tables have no RLS**, mitigated by a static check (§1).
+- **Consent is not resolved from the database on the ingest path.** The tracker
+  reads a Redis cache the SDK populates; a device whose consent was recorded
+  through the API but which has not reported since is treated as unknown until
+  the cache is warmed. Acceptable under `permissive`, a real gap under `strict`.
+- **No bulk erasure.** One device at a time, synchronously. Erasing a whole app
+  or organisation needs the asynchronous path and does not exist.
+- **The audit log records configuration changes only.** Reads are not recorded.
 - **No penetration test.** Everything here is self-assessed.
 - **No rate limiting on the business API.** Login is limited per account and per
   address; the rest of the API is not. An authenticated user can currently make

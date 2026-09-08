@@ -15,7 +15,7 @@ buried in the middle is a checklist that gets skimmed.
 
 | | Item | Why it blocks |
 | --- | --- | --- |
-| **Open** | **A real KMS provider for credential wrapping** | Partner API tokens and webhook signing secrets are encrypted under a key derived from configuration, in the same process as the data. That is the property KMS exists to provide. `provider_from_settings` refuses to start when `MMP_ENVIRONMENT=prod`, so this is enforced rather than remembered. |
+| Done | **A real KMS provider for credential wrapping** | `mmp_crypto.kms`. Production requires `MMP_KMS_KEY_ID` and refuses to start without it. **Untested against real AWS** — the tests use a stand-in client, so the first deployment is the first verification of the call shape. Budget for that. |
 | **Open** | **Egress network isolation for outbound delivery** | The SSRF guard in `mmp_core.outbound` is defence in depth. The other half — a network segment with no route to internal services — lives in infrastructure and is not in this repository. |
 | **Open** | **Verify the published latency SLO** | The integration docs commit to p99 < 120 ms. The in-repo benchmark is a regression gate against a recorded baseline and says so; the SLO needs `infra/load/ingest.k6.js` run from separate hardware against a real deployment. Ad networks ask for this number on day one. |
 | **Open** | **A cost-per-million-events target** | Without one, engineering optimises for nothing and the product may be priced below what it costs to run. Raised in the build plan and still unanswered. |
@@ -55,7 +55,7 @@ buried in the middle is a checklist that gets skimmed.
 | Done | API keys stored as HMAC under a pepper, shown once | Peppers must come from KMS in production, not the environment. |
 | Done | Rotation implemented for API keys and webhook secrets | Rotation *overlaps* for API keys so an SDK in the field is never left without a working credential. |
 | **Open** | Rotation schedule and reminders | Implemented, unscheduled. |
-| **Open** | Peppers sourced from KMS at boot | Currently environment variables. Same blocker as credential wrapping. |
+| **Open** | Peppers sourced from KMS at boot | The credential-wrapping key now comes from KMS; the API-key and IP-hash peppers are still environment variables. Smaller than the original gap and not closed. |
 
 ## Observability
 
@@ -86,6 +86,19 @@ buried in the middle is a checklist that gets skimmed.
 | Done | Security headers on every service | |
 | **Open** | Penetration test | Everything above is self-assessed. |
 | **Open** | Dependency update policy | `pip-audit` gates CI; nothing drives routine upgrades. |
+
+## Privacy
+
+| | Item | Notes |
+| --- | --- | --- |
+| Done | Consent evaluated at the edge, before persistence | Applied after storage it becomes a deletion problem. |
+| Done | Per-app consent mode, denial always honoured | Default `permissive`; `strict` is a commercial decision, not a technical one. |
+| Done | Device erasure, enumerated and tested against the schema | A new person-linked table fails the test until someone decides what erasure means for it. |
+| Done | Hash-chained audit log with a verification endpoint | Tamper-evident, and says so. |
+| **Open** | Consent resolved from the database on the ingest path | The tracker reads a Redis cache the SDK populates. A gap under `strict`. |
+| **Open** | Bulk erasure | One device at a time. A whole app or organisation needs the async path. |
+| **Open** | Retention enforcement | Partition retention exists; per-app configurable retention does not. |
+| **Open** | Chain head recorded outside the database | Without it the audit log cannot detect a wholesale rewrite. |
 
 ## Operations
 

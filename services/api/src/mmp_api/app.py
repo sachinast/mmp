@@ -19,6 +19,7 @@ from mmp_api.routes import (
     keys,
     organizations,
     postbacks,
+    privacy,
     webhooks,
 )
 from mmp_core import (
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         analytics.router,
         postbacks.router,
         webhooks.router,
+        privacy.router,
     ):
         app.include_router(router, prefix="/v1")
 

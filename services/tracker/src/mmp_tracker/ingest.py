@@ -18,6 +18,7 @@ from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
 from mmp_core.metrics import events_accepted, observe_rejection
 from mmp_crypto.pii import hash_device_id, hash_ip
+from mmp_ingest.consent import ConsentSet, Mode, Purpose, State, minimise
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
     EventBatch,
@@ -157,6 +158,14 @@ async def ingest_events(request: Request) -> Response:
         observe_rejection("invalid_event")
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
+    # Consent, before anything is queued.
+    #
+    # Checked here rather than downstream because consent applied after
+    # persistence is a deletion problem: the data is already in a partition, a
+    # rollup, a postback and a partner's system. Applied at the edge, a denied
+    # purpose means the field never existed.
+    await _apply_consent(state, auth.app_id, queued, mode=auth.consent_mode)
+
     # Sessions are decided server-side, after validation. The SDK reports
     # activity; where the boundaries fall is ours to say, or two devices with
     # different clock behaviour would produce incomparable session counts.
@@ -257,3 +266,54 @@ async def _assign_sessions(state: TrackerState, app_id: str, events: list[Queued
         ended = await state.sessions.end(app_id=app_id, anonymous_id=event.anonymous_id)
         if ended is not None:
             event.session_id = str(ended)
+
+
+# The event an SDK sends to report a consent decision. Handled as a normal event
+# so it travels the same authenticated, rate-limited, validated path as anything
+# else, rather than needing an endpoint of its own with its own auth.
+CONSENT_EVENT = "consent_update"
+
+
+async def _apply_consent(
+    state: TrackerState,
+    app_id: str,
+    events: list[QueuedEvent],
+    *,
+    mode: str = "permissive",
+) -> None:
+    """Record consent updates, then minimise everything else accordingly.
+
+    Consent events are processed first and in order, so a batch that reports a
+    grant and then sends data under it behaves as the SDK intended — an SDK
+    flushing after the user accepted a dialogue sends exactly that batch.
+    """
+    for event in events:
+        if event.event_name != CONSENT_EVENT:
+            continue
+        states: dict[Purpose, State] = {}
+        for key, value in (event.properties or {}).items():
+            try:
+                purpose = Purpose(key)
+                states[purpose] = State(str(value))
+            except ValueError:
+                # An unknown purpose or state is ignored rather than rejected:
+                # an older SDK reporting a purpose we have since renamed should
+                # not lose its whole batch. Debug rather than warning — at
+                # ingest volume one line per stale SDK is its own incident.
+                log.debug("consent_purpose_unrecognised", purpose=key)
+                continue
+        if states:
+            await state.consent.record(app_id, event.anonymous_id, states)
+
+    # One lookup per distinct device, not per event.
+    devices = {event.anonymous_id for event in events}
+    consents = await state.consent.lookup_many(app_id, list(devices), mode=Mode(mode))
+
+    for event in events:
+        consent = consents.get(event.anonymous_id, ConsentSet())
+        event.properties = minimise(event.properties, consent)
+        if not consent.allows(Purpose.ATTRIBUTION):
+            # Not merely stripped from properties: these are first-class columns
+            # and would otherwise carry the identifier past the minimiser.
+            event.click_id = None
+            event.ip_hash = None

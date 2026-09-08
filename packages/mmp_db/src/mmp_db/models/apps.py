@@ -13,6 +13,7 @@ from mmp_db.base import Base, OrgScopedMixin, TimestampMixin, one_of, org_fk, uu
 
 PLATFORMS = ("android", "ios", "cross_platform")
 APP_STATUSES = ("active", "paused", "disabled")
+CONSENT_MODES = ("permissive", "strict")
 KEY_ENVIRONMENTS = ("dev", "prod")
 KEY_STATUSES = ("active", "revoked")
 KEY_KINDS = ("sdk", "s2s")
@@ -23,6 +24,7 @@ class App(Base, OrgScopedMixin, TimestampMixin):
     __table_args__ = (
         CheckConstraint(one_of("platform", *PLATFORMS), name="platform_valid"),
         CheckConstraint(one_of("status", *APP_STATUSES), name="status_valid"),
+        CheckConstraint(one_of("consent_mode", *CONSENT_MODES), name="consent_mode_valid"),
         # Attribution windows are bounded here rather than trusted from the API,
         # because an unbounded window turns every install into a full-history
         # click scan.
@@ -46,6 +48,15 @@ class App(Base, OrgScopedMixin, TimestampMixin):
     install_window_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=7)
     event_window_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=30)
     session_timeout_minutes: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=30)
+
+    # How the absence of a consent record is read. An explicit denial is always
+    # honoured; this decides only what "we have not been told" means. Defaults
+    # to permissive so that shipping consent support does not silently stop
+    # attributing every existing advertiser's installs — see mmp_ingest.consent
+    # for the full argument.
+    consent_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="permissive", server_default="permissive"
+    )
 
 
 class ApiKey(Base, OrgScopedMixin, TimestampMixin):

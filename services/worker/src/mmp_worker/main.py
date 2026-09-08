@@ -16,7 +16,7 @@ import socket
 from collections.abc import Awaitable, Callable
 
 from mmp_core.settings import Settings
-from mmp_crypto.envelope import provider_from_settings
+from mmp_crypto.kms import provider_from_settings
 from mmp_db.pool import Database
 from redis.asyncio import Redis
 

@@ -99,6 +99,35 @@ comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
 
+## Consent and erasure
+
+Consent is evaluated **at the edge, before anything is stored**. Applied after
+persistence it becomes a deletion problem — the data is already in a partition, a
+rollup, a postback and a partner's system.
+
+Purposes are separable, and forwarding to a third party needs both `attribution`
+and `advertising`: sending a conversion to a network is an advertising use *of an
+attribution*, and someone who allowed one but not the other has not agreed.
+
+**An explicit denial is always honoured.** What *silence* means is per-app:
+
+| `consent_mode` | Unknown consent |
+| --- | --- |
+| `permissive` (default) | proceeds |
+| `strict` | denies |
+
+The default is permissive **not** because it is safer — it is not — but because
+strict-by-default would silently stop attributing every existing advertiser's
+installs the moment it shipped, which is a data loss event wearing a privacy
+feature's clothes. Strict is one field away and is correct for an app serving
+users in a consent jurisdiction; making it the default is a commercial decision.
+
+Erasure enumerates every table explicitly, and a test walks the schema so a new
+person-linked table fails until someone decides what erasure means for it.
+Rollups are excluded (aggregate counts, no identifier) and clicks are
+**de-identified rather than deleted** — removing one would change a click count
+for a period already billed and already reported.
+
 ## Operating it
 
 Each service exposes `/metrics` in Prometheus format. There are deliberately **no
@@ -343,6 +372,6 @@ These are tests, not conventions. They fail the build:
 - [ ] Phase 8 — React Native SDK
 - [x] **Phase 9** — S2S, postbacks, webhooks
 - [x] **Phase 10** — reliability and security audit
-- [ ] Phase 11 — privacy, consent, provider framework
+- [x] **Phase 11** — privacy, consent, KMS *(provider framework outstanding)*
 - [ ] Phase 12 — deep links, fraud signals, export
 - [ ] Phase 13 — iOS attribution (parallel workstream)

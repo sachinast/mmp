@@ -96,6 +96,13 @@ disallow_untyped_defs = false
 module = ["asyncpg.*"]
 ignore_missing_imports = true
 
+# boto3 is an optional dependency, imported lazily inside the KMS provider so
+# that services which never wrap a credential do not carry an AWS SDK. It is
+# named explicitly rather than covered by a blanket ignore.
+[[tool.mypy.overrides]]
+module = ["boto3.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------- tests
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

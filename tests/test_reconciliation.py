@@ -66,7 +66,12 @@ async def test_reconcile_records_both_ends(seeded_app, owner_conn, ingest_redis)
     from mmp_db.pool import Database
 
     now = dt.datetime.now(dt.UTC)
-    bucket = (now - dt.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    # Two hours back, not one. The settling period moves the window's upper
+    # bound to the start of the previous hour, so a bucket exactly one hour old
+    # sits *on* that bound and is excluded — but only when the test runs in the
+    # first ten minutes of an hour. A test that fails one run in six is worse
+    # than no test.
+    bucket = (now - dt.timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
 
     for index in range(5):
         await owner_conn.execute(
@@ -118,7 +123,8 @@ async def test_missing_events_are_detected(seeded_app, owner_conn, ingest_redis)
     from mmp_ingest.audit import AcceptedCounter
 
     now = dt.datetime.now(dt.UTC)
-    bucket = (now - dt.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    # See the note above about the settling boundary.
+    bucket = (now - dt.timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
 
     # 200 accepted, 100 stored: half the hour vanished.
     for index in range(100):
@@ -192,3 +198,26 @@ async def test_counter_recovers_a_failed_flush(ingest_redis):
     # The count survived and goes out on the next attempt.
     counter._redis = ingest_redis
     assert await counter.flush() == 42
+
+
+@pytest.mark.parametrize("minutes_past_the_hour", [0, 5, 9, 11, 30, 59])
+def test_the_settling_window_is_stable_across_the_hour(minutes_past_the_hour):
+    """The window must not depend on where in the hour the job happens to run.
+
+    Found by a test that failed only between HH:00 and HH:10, when the settling
+    period moves the upper bound back an hour and a one-hour-old bucket lands
+    exactly on it. The job itself is correct — it deliberately excludes the hour
+    that just ended — but the boundary is sharp enough to be worth pinning.
+    """
+    from mmp_worker.reconcile import SETTLING_PERIOD
+
+    now = dt.datetime(2026, 9, 8, 14, minutes_past_the_hour, tzinfo=dt.UTC)
+    end = (now - SETTLING_PERIOD).replace(minute=0, second=0, microsecond=0)
+
+    # Whatever the minute, a bucket two hours old is inside the window and the
+    # current hour is not.
+    two_hours_ago = (now - dt.timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+
+    assert two_hours_ago < end, "a settled bucket must be inside the window"
+    assert current_hour >= end, "the in-flight hour must be outside it"
