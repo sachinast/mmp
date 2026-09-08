@@ -24,6 +24,7 @@ from mmp_api.routes import (
     organizations,
     postbacks,
     privacy,
+    skan,
     webhooks,
 )
 from mmp_core import (
@@ -92,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fraud.router,
         deeplinks.router,
         exports.router,
+        skan.router,
     ):
         app.include_router(router, prefix="/v1")
 

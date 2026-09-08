@@ -30,6 +30,9 @@ export interface NativeBridge {
   /** GAID or IDFA. Must return null when the user has opted out. */
   getAdvertisingId?(): Promise<string | null>;
   getDeviceInfo?(): Promise<DeviceInfo>;
+  /** iOS only. Reports a SKAdNetwork conversion value; see `conversion.ts` for
+   *  why the decision to call is made before this point. */
+  updateConversionValue?(fineValue: number, coarseValue: string | null): Promise<boolean>;
 }
 
 export interface DeviceInfo {
@@ -50,6 +53,9 @@ export const NO_NATIVE: NativeBridge = {
   },
   async getDeviceInfo() {
     return {};
+  },
+  async updateConversionValue() {
+    return false;
   },
 };
 

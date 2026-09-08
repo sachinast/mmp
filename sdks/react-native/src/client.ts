@@ -19,6 +19,7 @@
  * than obtained and then withheld.
  */
 import { Consent } from "./consent";
+import { ConversionValues } from "./conversion";
 import { Identity } from "./identity";
 import { NO_NATIVE, callNative, type DeviceInfo, type NativeBridge } from "./native";
 import { EventQueue } from "./queue";
@@ -62,6 +63,7 @@ export class MmpClient {
   private readonly native: NativeBridge;
   private readonly identity: Identity;
   private readonly consent: Consent;
+  private readonly conversions: ConversionValues;
   private readonly queue: EventQueue;
   private readonly transport: Transport;
   private readonly now: () => number;
@@ -105,6 +107,7 @@ export class MmpClient {
     const random = deps.random ?? platformRandom();
     this.identity = new Identity(this.storage, random);
     this.consent = new Consent(this.storage);
+    this.conversions = new ConversionValues(this.storage);
     this.transport = new Transport({
       endpoint: config.endpoint,
       apiKey: config.apiKey,
@@ -132,6 +135,9 @@ export class MmpClient {
       await this.reportInstallOnce(firstLaunch);
       this.startTimer();
       void this.flush();
+      // Not awaited. The mapping is only useful on iOS and only once an event
+      // happens, so a first launch should not wait on a network call for it.
+      void this.loadConversionMappings();
     } catch (error) {
       this.logger.error("mmp: initialize failed", { error: String(error) });
     }
@@ -183,6 +189,43 @@ export class MmpClient {
       return;
     }
     await this.enqueue(eventName, options);
+    await this.reportConversion(eventName);
+  }
+
+  private async loadConversionMappings(): Promise<void> {
+    if (this.device.platform !== "ios") return;
+    try {
+      const mappings = await this.transport.fetchConversionValues();
+      if (mappings) this.conversions.setMappings(mappings);
+    } catch (error) {
+      this.logger.debug("mmp: conversion mapping unavailable", { error: String(error) });
+    }
+  }
+
+  /**
+   * Tells Apple about this event, if it would move the value.
+   *
+   * The decision is made in `ConversionValues` rather than here, and it matters
+   * that it is made at all: Apple ignores a decrease instead of reporting one,
+   * and every accepted call restarts the measurement window — so an SDK that
+   * called on every event would look like it was working while discarding most
+   * of what it sent, and would delay its own postback doing it.
+   */
+  private async reportConversion(eventName: string): Promise<void> {
+    if (this.device.platform !== "ios") return;
+    try {
+      const update = await this.conversions.apply(eventName);
+      if (!update) return;
+      await callNative(
+        this.native.updateConversionValue
+          ? () =>
+              this.native.updateConversionValue!(update.fineValue, update.coarseValue)
+          : undefined,
+        false,
+      );
+    } catch (error) {
+      this.logger.debug("mmp: conversion value not reported", { error: String(error) });
+    }
   }
 
   async setUserId(userId: string | null): Promise<void> {
@@ -251,6 +294,7 @@ export class MmpClient {
   async reset(): Promise<void> {
     try {
       await this.identity.reset(this.now());
+      await this.conversions.clear();
       this.deferredDeepLink = null;
       await this.storage.remove(KEYS.deepLink);
     } catch (error) {

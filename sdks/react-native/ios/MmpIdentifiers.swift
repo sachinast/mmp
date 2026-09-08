@@ -1,5 +1,6 @@
 import AdSupport
 import AppTrackingTransparency
+import StoreKit
 import Foundation
 import UIKit
 
@@ -97,6 +98,55 @@ import UIKit
         return mirror.children.reduce(into: "") { identifier, element in
             guard let value = element.value as? Int8, value != 0 else { return }
             identifier += String(UnicodeScalar(UInt8(value)))
+        }
+    }
+
+    /// Reports a conversion value to SKAdNetwork.
+    ///
+    /// Three APIs across three iOS versions, and the differences matter:
+    /// the coarse value only exists from 16.1, and before 15.4 there is no
+    /// completion handler at all. Calling the newest one unconditionally would
+    /// crash on anything older, so each tier is entered explicitly.
+    ///
+    /// Apple *ignores* a decrease rather than reporting one, and every accepted
+    /// call restarts the measurement window. Deciding whether a call is worth
+    /// making therefore happens before this point — see `conversion.ts` — and
+    /// this method only sends what it is given.
+    @objc public static func updateConversionValue(
+        fineValue: Int,
+        coarseValue: String?,
+        completion: @escaping (Bool) -> Void
+    ) {
+        if #available(iOS 16.1, *) {
+            SKAdNetwork.updatePostbackConversionValue(
+                fineValue,
+                coarseValue: coarse(from: coarseValue)
+            ) { error in
+                completion(error == nil)
+            }
+        } else if #available(iOS 15.4, *) {
+            // No coarse value before 16.1; the fine value is all there is.
+            SKAdNetwork.updatePostbackConversionValue(fineValue) { error in
+                completion(error == nil)
+            }
+        } else if #available(iOS 14, *) {
+            // Fire and forget: this API reports nothing back.
+            SKAdNetwork.updateConversionValue(fineValue)
+            completion(true)
+        } else {
+            completion(false)
+        }
+    }
+
+    @available(iOS 16.1, *)
+    private static func coarse(from value: String?) -> SKAdNetwork.CoarseConversionValue {
+        switch value {
+        case "high": return .high
+        case "medium": return .medium
+        case "low": return .low
+        // Apple has no "unset" case, and `.low` is the honest default: claiming
+        // a higher tier than the app asked for would overstate the conversion.
+        default: return .low
         }
     }
 

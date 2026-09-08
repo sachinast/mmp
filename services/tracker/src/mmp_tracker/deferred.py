@@ -120,3 +120,52 @@ async def resolve_deferred(request: Request) -> Response:
         {"destination": destination, "matched": True},
         headers={"cache-control": "no-store"},
     )
+
+
+# --- SKAdNetwork conversion value mapping -----------------------------------
+#
+# Served from the tracker rather than the API because the SDK already
+# authenticates here, with a key that authorises exactly one app. Sending it to
+# the management API would mean shipping a second credential inside the binary.
+#
+# The mapping is not a secret — it is the advertiser's own configuration, and it
+# is read by their own app — but it is still scoped to the authenticated app so
+# one advertiser's key cannot read another's conversion model.
+CONVERSION_MAPPING_SQL = """
+SELECT event_name, conversion_value, coarse_value
+FROM conversion_mappings
+WHERE app_id = $1 AND platform = 'ios'
+ORDER BY conversion_value
+"""
+
+
+async def conversion_values(request: Request) -> Response:
+    state: TrackerState = request.app.state.tracker
+
+    header = request.headers.get("authorization")
+    presented = header[7:].strip() if header and header.lower().startswith("bearer ") else None
+    if not presented:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        auth = await state.authenticator.authenticate(presented)
+    except AuthError:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    async with state.database.acquire_raw() as conn:
+        rows = await conn.fetch(CONVERSION_MAPPING_SQL, auth.app_id)
+
+    return JSONResponse(
+        {
+            "mappings": [
+                {
+                    "event_name": row["event_name"],
+                    "conversion_value": row["conversion_value"],
+                    "coarse_value": row["coarse_value"],
+                }
+                for row in rows
+            ]
+        },
+        # Cached briefly at the client, not here: an advertiser who changes
+        # their model wants it live within minutes, not on the next app release.
+        headers={"cache-control": "private, max-age=300"},
+    )

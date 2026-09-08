@@ -14,6 +14,7 @@
  *   revoked key. Retrying is pointless and an infinite loop against someone
  *   else's servers, so the events are dropped and the failure is reported.
  */
+import type { ConversionMapping } from "./conversion";
 import type { Logger, WireEvent } from "./types";
 
 export type SendOutcome =
@@ -62,6 +63,41 @@ export class Transport {
       return body.destination ?? null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The advertiser's conversion value mapping.
+   *
+   * Returns null on any failure rather than throwing: without a mapping the SDK
+   * simply reports no conversion values, which is a degradation, not a reason
+   * for the host app to see an error.
+   */
+  async fetchConversionValues(): Promise<ConversionMapping[] | null> {
+    try {
+      const response = await this.get("/v1/skan/conversion-values");
+      if (!response.ok) return null;
+      const body = (await response.json()) as { mappings?: ConversionMapping[] };
+      return Array.isArray(body.mappings) ? body.mappings : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async get(path: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
+    try {
+      return await this.fetchImpl(`${trimEnd(this.options.endpoint)}${path}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${this.options.apiKey}` },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

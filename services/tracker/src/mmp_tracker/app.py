@@ -32,7 +32,7 @@ from mmp_core import (
     tune_for_latency,
     unhandled_exception_handler,
 )
-from mmp_tracker.deferred import resolve_deferred
+from mmp_tracker.deferred import conversion_values, resolve_deferred
 from mmp_tracker.ingest import ingest_events
 from mmp_tracker.redirect import redirect_click
 from mmp_tracker.s2s import ingest_s2s
@@ -114,6 +114,7 @@ def create_app(settings: Settings | None = None) -> Starlette:
         Route("/v1/events", ingest_events, methods=["POST"]),
         Route("/v1/s2s/events", ingest_s2s, methods=["POST"]),
         Route("/v1/deeplink/resolve", resolve_deferred, methods=["POST"]),
+        Route("/v1/skan/conversion-values", conversion_values, methods=["GET"]),
         Route(
             "/.well-known/skadnetwork/report-attribution",
             receive_postback,

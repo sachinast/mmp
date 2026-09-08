@@ -28,6 +28,8 @@ export {
   type Storage,
 } from "./storage";
 export { InsecureRandomError } from "./uuid7";
+export { ConversionValues, COARSE_ORDER } from "./conversion";
+export type { CoarseValue, ConversionMapping } from "./conversion";
 export type { NativeBridge, DeviceInfo } from "./native";
 export {
   createNativeBridge,

@@ -299,3 +299,120 @@ beforeEach(() => {
   counter = 0;
   vi.restoreAllMocks();
 });
+
+
+describe("skadnetwork conversion values", () => {
+  function iosHarness(mappings: unknown[], updateConversionValue = vi.fn(async () => true)) {
+    const storage = new MemoryStorage();
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string, init?: { body?: string }) => {
+      calls.push(url);
+      if (url.includes("/v1/skan/conversion-values")) {
+        return { status: 200, ok: true, json: async () => ({ mappings }) };
+      }
+      void init;
+      return { status: 202, ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const client = new MmpClient(
+      { apiKey: "pk", endpoint: "https://track.example.com" },
+      {
+        storage,
+        random: RANDOM,
+        fetchImpl,
+        now: () => 1_700_000_000_000,
+        native: {
+          async getDeviceInfo() {
+            return { platform: "ios" as const, osVersion: "17.0" };
+          },
+          updateConversionValue,
+        },
+      },
+    );
+    return { client, updateConversionValue, calls };
+  }
+
+  it("reports a conversion value for a mapped event", async () => {
+    const h = iosHarness([{ event_name: "purchase", conversion_value: 40, coarse_value: "high" }]);
+    await h.client.initialize();
+    await h.client.track("purchase");
+
+    expect(h.updateConversionValue).toHaveBeenCalledWith(40, "high");
+  });
+
+  it("does not call Apple again for a value that would be ignored", async () => {
+    // Apple ignores a decrease rather than reporting one, and every accepted
+    // call restarts the measurement window — so a chatty SDK delays its own
+    // postback while appearing to work.
+    const h = iosHarness([
+      { event_name: "purchase", conversion_value: 40 },
+      { event_name: "signup", conversion_value: 5 },
+    ]);
+    await h.client.initialize();
+    await h.client.track("purchase");
+    await h.client.track("signup");
+    await h.client.track("purchase");
+
+    expect(h.updateConversionValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing for an unmapped event", async () => {
+    const h = iosHarness([{ event_name: "purchase", conversion_value: 40 }]);
+    await h.client.initialize();
+    await h.client.track("browse");
+    expect(h.updateConversionValue).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch the mapping on android", async () => {
+    // SKAdNetwork is iOS-only; asking for it anywhere else is a request per
+    // launch that can never be useful.
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      return { status: 202, ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const client = new MmpClient(
+      { apiKey: "pk", endpoint: "https://track.example.com" },
+      {
+        storage: new MemoryStorage(),
+        random: RANDOM,
+        fetchImpl,
+        native: {
+          async getDeviceInfo() {
+            return { platform: "android" as const };
+          },
+        },
+      },
+    );
+    await client.initialize();
+    await client.track("purchase");
+    await client.flush();
+
+    expect(urls.some((u) => u.includes("conversion-values"))).toBe(false);
+    expect(urls.some((u) => u.includes("/v1/events"))).toBe(true);
+  });
+
+  it("keeps working when the mapping cannot be fetched", async () => {
+    const failing = (async (url: string) => {
+      if (url.includes("conversion-values")) throw new Error("offline");
+      return { status: 202, ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const client = new MmpClient(
+      { apiKey: "pk", endpoint: "https://track.example.com" },
+      {
+        storage: new MemoryStorage(),
+        random: RANDOM,
+        fetchImpl: failing,
+        native: {
+          async getDeviceInfo() {
+            return { platform: "ios" as const };
+          },
+        },
+      },
+    );
+    await expect(client.initialize()).resolves.toBeUndefined();
+    await expect(client.track("purchase")).resolves.toBeUndefined();
+  });
+});

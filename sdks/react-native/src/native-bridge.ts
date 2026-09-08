@@ -24,6 +24,7 @@ export interface NativeModuleShape {
   getInstallReferrer?(): Promise<string | null>;
   getAdvertisingId?(): Promise<string | null>;
   getDeviceInfo?(): Promise<Record<string, unknown>>;
+  updateConversionValue?(fineValue: number, coarseValue: string | null): Promise<boolean>;
 }
 
 /**
@@ -92,6 +93,17 @@ export function createNativeBridge(module: NativeModuleShape | undefined): Nativ
       const deviceModel = cleanString(info["deviceModel"]);
       if (deviceModel) result.deviceModel = deviceModel;
       return result;
+    };
+  }
+
+  if (typeof module.updateConversionValue === "function") {
+    bridge.updateConversionValue = async (fineValue, coarseValue) => {
+      // Clamped here as well as server-side. Apple rejects the whole update for
+      // an out-of-range value rather than clamping it, and the SDK cannot see
+      // the rejection on iOS 14, so an out-of-range value would be lost in
+      // silence.
+      const clamped = Math.max(0, Math.min(63, Math.trunc(fineValue)));
+      return (await module.updateConversionValue!(clamped, coarseValue)) === true;
     };
   }
 

@@ -108,6 +108,10 @@ class Account:
         headers = {**kwargs.pop("headers", {}), **self.headers()}
         return await self.client.post(url, headers=headers, **kwargs)
 
+    async def put(self, url: str, **kwargs) -> httpx.Response:
+        headers = {**kwargs.pop("headers", {}), **self.headers()}
+        return await self.client.put(url, headers=headers, **kwargs)
+
     async def patch(self, url: str, **kwargs) -> httpx.Response:
         headers = {**kwargs.pop("headers", {}), **self.headers()}
         return await self.client.patch(url, headers=headers, **kwargs)

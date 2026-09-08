@@ -44,6 +44,21 @@ final class MmpNative: NSObject {
         resolve(MmpIdentifiers.deviceInfo())
     }
 
+    @objc(updateConversionValue:coarseValue:resolver:rejecter:)
+    func updateConversionValue(
+        fineValue: NSNumber,
+        coarseValue: NSString?,
+        resolve: @escaping (Any?) -> Void,
+        reject: @escaping (String?, String?, Error?) -> Void
+    ) {
+        MmpIdentifiers.updateConversionValue(
+            fineValue: fineValue.intValue,
+            coarseValue: coarseValue as String?
+        ) { ok in
+            resolve(ok)
+        }
+    }
+
     /// Presents the ATT prompt. Exposed so the *app* can choose the moment —
     /// the SDK never calls this itself. See `MmpIdentifiers`.
     @objc(requestTrackingAuthorization:rejecter:)
