@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from mmp_attrib.candidates import load_candidates
 from mmp_attrib.store import link_user, record
 from mmp_core.logging import get_logger
+from mmp_core.metrics import attributions
 from mmp_db.pool import Database
 from mmp_ingest.schema import QueuedEvent
 from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
@@ -235,6 +236,7 @@ class AttributionConsumer:
         self.metrics.processed += 1
         method = str(decision.method)
         self.metrics.by_method[method] = self.metrics.by_method.get(method, 0) + 1
+        attributions.labels(method=method).inc()
         if decision.method is Method.ORGANIC:
             self.metrics.organic += 1
         else:

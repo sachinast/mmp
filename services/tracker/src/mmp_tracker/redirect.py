@@ -26,6 +26,7 @@ from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_core.metrics import redirect_latency, redirects
 from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.clicks import MAX_SUB_PARAM, MAX_USER_AGENT, QueuedClick
 from starlette.requests import Request
@@ -103,6 +104,9 @@ def build_destination(
 
 
 async def redirect_click(request: Request) -> Response:
+    import time
+
+    started = time.perf_counter()
     state: TrackerState = request.app.state.tracker
     tracking_code = request.path_params["tracking_code"]
     now = dt.datetime.now(dt.UTC)
@@ -111,12 +115,16 @@ async def redirect_click(request: Request) -> Response:
     if link is None:
         if state.links.is_known_missing(tracking_code, now=now):
             state.unknown_codes += 1
+            redirects.labels(outcome="unknown_code").inc()
+            redirect_latency.observe(time.perf_counter() - started)
             return PlainTextResponse("not found", status_code=404, headers=NO_STORE)
         # One indexed lookup, then cached. Reached for a link created moments
         # ago, or by a process that started before it existed.
         link = await state.links.load_missing(tracking_code)
         if link is None:
             state.unknown_codes += 1
+            redirects.labels(outcome="unknown_code").inc()
+            redirect_latency.observe(time.perf_counter() - started)
             return PlainTextResponse("not found", status_code=404, headers=NO_STORE)
 
     click_id = str(uuid7())
@@ -169,6 +177,10 @@ async def redirect_click(request: Request) -> Response:
     dropped = state.click_buffer.append([click])
     if not dropped:
         state.clicks_total += 1
+
+    redirects.labels(outcome="redirected").inc()
+    # Observed last, so the histogram covers everything the person waited for.
+    redirect_latency.observe(time.perf_counter() - started)
 
     # 302, not 301: a permanent redirect would be cached by the browser and by
     # every intermediary, and subsequent clicks would never reach us at all.

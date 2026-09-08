@@ -96,3 +96,7 @@ bench-baseline: ## Re-record the latency baseline
 .PHONY: dev-stack
 dev-stack: ## Run the API and the dashboard together (for local browsing)
 	./infra/scripts/dev_stack.sh
+
+.PHONY: backup-drill
+backup-drill: ## Dump, restore into a scratch database, and compare
+	./infra/scripts/backup_restore_drill.sh mmp_dev

@@ -27,6 +27,7 @@ import uuid
 import msgspec
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_core.metrics import events_accepted, observe_rejection
 from mmp_crypto.signing import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -135,6 +136,7 @@ async def ingest_s2s(request: Request) -> Response:
     )
     if not fresh:
         log.warning("s2s_replay_rejected", app_id=auth.app_id)
+        observe_rejection("replayed")
         return JSONResponse({"error": "replayed_request"}, status_code=409)
 
     try:
@@ -184,7 +186,10 @@ async def ingest_s2s(request: Request) -> Response:
             auth.app_id, [event.event_id for event in accepted[:dropped]]
         )
 
-    state.accepted_total += len(accepted) - dropped
+    written = len(accepted) - dropped
+    state.accepted_total += written
+    state.accepted_counter.record(auth.app_id, written)
+    events_accepted.labels(source="s2s").inc(written)
     return JSONResponse(
         {"accepted": len(accepted) - dropped, "duplicates": duplicates, "dropped": dropped},
         status_code=202,

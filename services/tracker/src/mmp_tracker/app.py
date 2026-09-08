@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from mmp_core.metrics import metrics_endpoint, sample_stream_depths
 from mmp_core.settings import Settings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -81,15 +82,44 @@ def create_app(settings: Settings | None = None) -> Starlette:
             }
         )
 
+    async def _flush_audit() -> None:
+        """Push accepted counts to Redis periodically.
+
+        On the metrics scrape rather than a timer of its own: scrapes happen
+        every fifteen seconds anyway, and one fewer background task is one fewer
+        thing to drain on shutdown.
+        """
+        state = getattr(app_holder.get("app"), "state", None)
+        tracker = getattr(state, "tracker", None) if state else None
+        if tracker is not None:
+            await tracker.accepted_counter.flush()
+
+    async def _sample() -> None:
+        state = getattr(app_holder.get("app"), "state", None)
+        tracker = getattr(state, "tracker", None) if state else None
+        if tracker is not None:
+            from mmp_ingest.stream import CLICKS_GROUP, CLICKS_STREAM, EVENTS_GROUP, EVENTS_STREAM
+
+            await _flush_audit()
+            await sample_stream_depths(
+                tracker.redis,
+                {EVENTS_STREAM: EVENTS_GROUP, CLICKS_STREAM: CLICKS_GROUP},
+            )
+
+    app_holder: dict[str, object] = {}
     routes = [Route(path, handler) for path, handler in health_routes(registry)]
     routes += [
         Route("/v1/events", ingest_events, methods=["POST"]),
         Route("/v1/s2s/events", ingest_s2s, methods=["POST"]),
         Route("/c/{tracking_code}", redirect_click, methods=["GET", "HEAD"]),
         Route("/internal/stats", stats, methods=["GET"]),
+        # Sampled at scrape time rather than maintained per message: keeping the
+        # backlog gauge accurate on every event would put a Redis round trip on
+        # the ingest path in order to measure the ingest path.
+        Route("/metrics", metrics_endpoint(_sample), methods=["GET"]),
     ]
 
-    return Starlette(
+    application = Starlette(
         routes=routes,
         lifespan=lifespan,
         middleware=[
@@ -101,6 +131,8 @@ def create_app(settings: Settings | None = None) -> Starlette:
         ],
         exception_handlers={Exception: unhandled_exception_handler},
     )
+    app_holder["app"] = application
+    return application
 
 
 app = create_app()

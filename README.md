@@ -45,11 +45,17 @@ it receive traffic — runs dependency probes, reports draining during shutdown)
 ## Quality gates
 
 ```bash
-make check     # lint + types + security + tests, exactly what CI runs
-make fmt       # autofix
-make audit     # dependency CVE scan against the lockfile
-make bench     # ingest latency regression gate
+make check         # lint + types + security + tests, exactly what CI runs
+make fmt           # autofix
+make audit         # dependency CVE scan against the lockfile
+make bench         # ingest latency regression gate
+make backup-drill  # dump, restore into a scratch database, compare
 ```
+
+`make backup-drill` is the one that matters least often and most: a backup
+nobody has restored is a hypothesis. It compares row counts, schema **and RLS
+policy count** — a restore that silently drops row-level security leaves a
+database that works and leaks.
 
 `make bench` compares median latency against `infra/load/baseline.json`. Only
 medians are gated — on a developer machine the tails are dominated by GC pauses
@@ -92,6 +98,33 @@ On Android the click id travels inside the Play Store `referrer` parameter and
 comes back through the Install Referrer API on first launch. That is what makes
 Android attribution deterministic. iOS has no equivalent channel, which is why
 it needs SKAdNetwork rather than a referrer — not an omission to fix later.
+
+## Operating it
+
+Each service exposes `/metrics` in Prometheus format. There are deliberately **no
+per-tenant labels**: a counter labelled by `app_id` has as many series as there
+are apps, and that is how a metrics bill becomes a surprise. Per-tenant numbers
+live in the rollups, which are built for it.
+
+The metrics that answer a 3am question:
+
+| Question | Metric |
+| --- | --- |
+| Has ingestion stopped? | `mmp_events_written_total` |
+| Are we behind? | `mmp_stream_backlog`, `mmp_stream_pending` |
+| Are redirects slow? | `mmp_redirect_duration_seconds` |
+| Did the match rate drop? | `mmp_attributions_total{method=…}` |
+| Are postbacks failing? | `mmp_deliveries_total{outcome=…}` |
+| **Are we losing events silently?** | `mmp_pipeline_drift` |
+
+That last one is the reason the reconciliation job exists. Every other failure
+announces itself; events accepted and never stored produce no signal at all —
+the numbers are just lower than they should be, and nobody knows until an
+advertiser reconciles against their ad network. The job counts both ends and
+compares, tolerating the drift that deduplication legitimately produces.
+
+`docs/SECURITY.md` and `docs/PRODUCTION_CHECKLIST.md` record what is protected,
+what is not, and what blocks production.
 
 ## Sending data out
 
@@ -309,7 +342,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 7** — dashboard
 - [ ] Phase 8 — React Native SDK
 - [x] **Phase 9** — S2S, postbacks, webhooks
-- [ ] Phase 10 — reliability and security audit
+- [x] **Phase 10** — reliability and security audit
 - [ ] Phase 11 — privacy, consent, provider framework
 - [ ] Phase 12 — deep links, fraud signals, export
 - [ ] Phase 13 — iOS attribution (parallel workstream)

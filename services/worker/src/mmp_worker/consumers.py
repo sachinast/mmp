@@ -20,6 +20,7 @@ from typing import Any
 
 import msgspec
 from mmp_core.logging import get_logger
+from mmp_core.metrics import events_duplicate, events_written
 from mmp_db.pool import Database
 from mmp_db.types import DbConn
 from mmp_ingest.clicks import ClickWriter, QueuedClick
@@ -158,6 +159,8 @@ class EventConsumer:
         self.metrics.events_received += received
         self.metrics.events_written += inserted
         self.metrics.duplicates += received - inserted
+        events_written.inc(inserted)
+        events_duplicate.inc(received - inserted)
         self.metrics.last_batch_at = dt.datetime.now(dt.UTC)
         return len(messages)
 

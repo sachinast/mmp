@@ -25,6 +25,7 @@ from mmp_worker.attribution import AttributionConsumer
 from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
 from mmp_worker.postbacks import PostbackConsumer, retry_due
+from mmp_worker.reconcile import reconcile
 from mmp_worker.rollups import refresh_late_arrivals, refresh_trailing
 from mmp_worker.webhook_sender import WebhookConsumer
 
@@ -39,6 +40,9 @@ LATE_ARRIVAL_INTERVAL = 6 * 3600.0
 # The shortest backoff is ~30s, so sweeping every 15s means a retry fires close
 # to when it was due rather than up to a full interval late.
 RETRY_INTERVAL = 15.0
+# Hourly. The job compares completed hours, so running it more often would
+# recompute the same answer.
+RECONCILE_INTERVAL = 3600.0
 
 
 def consumer_name() -> str:
@@ -138,6 +142,15 @@ async def run(settings: Settings | None = None) -> None:
                 stop=stop,
             ),
             name="postback-retry",
+        )
+        tasks.create_task(
+            _every(
+                RECONCILE_INTERVAL,
+                lambda: reconcile(database, redis),
+                name="reconciliation",
+                stop=stop,
+            ),
+            name="reconciliation",
         )
         tasks.create_task(
             _every(

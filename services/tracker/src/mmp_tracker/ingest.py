@@ -16,6 +16,7 @@ import zlib
 import msgspec
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_core.metrics import events_accepted, observe_rejection
 from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
@@ -93,16 +94,19 @@ async def ingest_events(request: Request) -> Response:
 
     presented = _bearer(request)
     if not presented:
+        observe_rejection("unauthorized")
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         auth = await state.authenticator.authenticate(presented)
     except AuthError:
+        observe_rejection("unauthorized")
         # One message for every failure mode, so the response cannot be used to
         # distinguish an unknown key from a wrong secret.
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     allowed = await state.limiter.check(f"ingest:{auth.app_id}", state.ingest_limit)
     if not allowed.allowed:
+        observe_rejection("rate_limited")
         return JSONResponse(
             {"error": "rate_limited"},
             status_code=429,
@@ -113,13 +117,16 @@ async def ingest_events(request: Request) -> Response:
         body = await _read_body(request, state)
         batch = _batch_decoder.decode(body)
     except ValidationFailure as exc:
+        observe_rejection("payload_too_large")
         return JSONResponse({"error": "invalid_payload", "detail": exc.reason}, status_code=413)
     except msgspec.DecodeError as exc:
+        observe_rejection("invalid_json")
         return JSONResponse({"error": "invalid_json", "detail": str(exc)}, status_code=400)
 
     if not batch.events:
         return JSONResponse({"accepted": 0, "duplicates": 0}, status_code=202)
     if len(batch.events) > MAX_EVENTS_PER_BATCH:
+        observe_rejection("batch_too_large")
         return JSONResponse(
             {"error": "batch_too_large", "detail": f"at most {MAX_EVENTS_PER_BATCH} events"},
             status_code=413,
@@ -147,6 +154,7 @@ async def ingest_events(request: Request) -> Response:
             _hash_advertising_ids(event, pepper=state.settings.ip_hash_pepper)
             queued.append(event)
     except ValidationFailure as exc:
+        observe_rejection("invalid_event")
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
     # Sessions are decided server-side, after validation. The SDK reports
@@ -168,7 +176,12 @@ async def ingest_events(request: Request) -> Response:
             auth.app_id, [event.event_id for event in accepted[:dropped]]
         )
 
-    state.accepted_total += len(accepted) - dropped
+    written = len(accepted) - dropped
+    state.accepted_total += written
+    state.accepted_counter.record(auth.app_id, written)
+    events_accepted.labels(source="sdk").inc(written)
+    if dropped:
+        observe_rejection("shed")
     return JSONResponse(
         {
             "accepted": len(accepted) - dropped,

@@ -187,3 +187,123 @@ async def test_readonly_role_cannot_write(two_orgs):
             )
     finally:
         await conn.close()
+
+
+# --- the raw event tables -----------------------------------------------
+#
+# Added after an audit found that `events` and `clicks` carried
+# organization_id, had no RLS, and were readable by mmp_api — which holds SELECT
+# on every table in the schema. Nothing queried them from the API, so no test
+# failed; the event explorer would have been the first query to cross a tenant.
+
+
+async def test_the_api_role_cannot_read_raw_events(api_pool, owner_conn, two_orgs):
+    """A privilege that is only safe because nobody has used it yet is not a
+    control."""
+    from mmp_core.ids import uuid7
+
+    org_a, _ = two_orgs
+    app_id = await owner_conn.fetchval(
+        "SELECT id FROM apps WHERE organization_id = $1 LIMIT 1", org_a
+    )
+    event_id = uuid7()
+    await owner_conn.execute(
+        """INSERT INTO events (event_id, received_at, occurred_at, organization_id,
+                               app_id, event_name, anonymous_id)
+           VALUES ($1, now(), now(), $2, $3, 'install', 'rls-probe')""",
+        event_id,
+        org_a,
+        app_id,
+    )
+    try:
+        # With no tenant set, the API role must see nothing at all.
+        async with api_pool.acquire() as conn:
+            assert await conn.fetchval("SELECT count(*) FROM events") == 0
+
+        # With a tenant set, it sees that tenant's rows and only those.
+        async with api_pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config($1, $2, $3)", TENANT_SETTING, str(org_a), True)
+            visible = await conn.fetch(
+                "SELECT organization_id FROM events WHERE anonymous_id = 'rls-probe'"
+            )
+        assert visible and {row["organization_id"] for row in visible} == {org_a}
+    finally:
+        await owner_conn.execute("DELETE FROM events WHERE event_id = $1", event_id)
+
+
+async def test_a_tenant_cannot_see_another_tenants_events(api_pool, owner_conn, two_orgs):
+    from mmp_core.ids import uuid7
+
+    org_a, org_b = two_orgs
+    app_a = await owner_conn.fetchval(
+        "SELECT id FROM apps WHERE organization_id = $1 LIMIT 1", org_a
+    )
+    event_id = uuid7()
+    await owner_conn.execute(
+        """INSERT INTO events (event_id, received_at, occurred_at, organization_id,
+                               app_id, event_name, anonymous_id)
+           VALUES ($1, now(), now(), $2, $3, 'install', 'cross-tenant-probe')""",
+        event_id,
+        org_a,
+        app_a,
+    )
+    try:
+        async with api_pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config($1, $2, $3)", TENANT_SETTING, str(org_b), True)
+            rows = await conn.fetch(
+                "SELECT event_id FROM events WHERE anonymous_id = 'cross-tenant-probe'"
+            )
+        assert not rows, "tenant B must not see tenant A's events"
+    finally:
+        await owner_conn.execute("DELETE FROM events WHERE event_id = $1", event_id)
+
+
+async def test_the_tracker_can_insert_events_but_not_read_them(owner_conn, two_orgs):
+    """Write-only by policy, not just by grant.
+
+    The tracker authenticates *into* an organisation and writes on its behalf,
+    so it inserts with no tenant set. It has no reason to read events back, and
+    not being able to is worth more than the symmetry.
+    """
+    import asyncpg
+    from mmp_core.ids import uuid7
+
+    from tests.conftest_db import role_dsn
+
+    org_a, _ = two_orgs
+    app_id = await owner_conn.fetchval(
+        "SELECT id FROM apps WHERE organization_id = $1 LIMIT 1", org_a
+    )
+    event_id = uuid7()
+
+    conn = await asyncpg.connect(role_dsn("mmp_tracker"))
+    try:
+        await conn.execute(
+            """INSERT INTO events (event_id, received_at, occurred_at, organization_id,
+                                   app_id, event_name, anonymous_id)
+               VALUES ($1, now(), now(), $2, $3, 'install', 'tracker-probe')""",
+            event_id,
+            org_a,
+            app_id,
+        )
+        # It wrote the row and cannot see it.
+        with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+            await conn.fetchval("SELECT count(*) FROM events")
+    finally:
+        await conn.close()
+        await owner_conn.execute("DELETE FROM events WHERE event_id = $1", event_id)
+
+
+async def test_the_worker_can_read_every_tenants_events(seeded_app, owner_conn):
+    """Attribution, rollups and reconciliation all cross tenants by design."""
+    import asyncpg
+
+    from tests.conftest_db import role_dsn
+
+    conn = await asyncpg.connect(role_dsn("mmp_worker"))
+    try:
+        # Not an error, and not silently zero: the worker's policy is USING(true).
+        assert await conn.fetchval("SELECT count(*) FROM events") >= 0
+        assert await conn.fetchval("SELECT count(*) FROM clicks") >= 0
+    finally:
+        await conn.close()

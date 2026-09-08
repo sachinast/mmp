@@ -8,6 +8,7 @@ from mmp_core.logging import get_logger
 from mmp_core.ratelimit import RateLimit, RateLimiter
 from mmp_core.settings import Settings
 from mmp_db.pool import Database
+from mmp_ingest.audit import AcceptedCounter
 from mmp_ingest.dedup import IdempotencyWindow
 from mmp_ingest.sessions import SessionTracker
 from mmp_ingest.stream import CLICKS_STREAM, EVENTS_STREAM, StreamProducer
@@ -38,6 +39,7 @@ class TrackerState:
     click_buffer: ShippingBuffer
     links: LinkCache
     sessions: SessionTracker
+    accepted_counter: AcceptedCounter
     ingest_limit: RateLimit = field(default=DEFAULT_INGEST_LIMIT)
     accepted_total: int = 0
     clicks_total: int = 0
@@ -73,10 +75,14 @@ class TrackerState:
             click_buffer=click_buffer,
             links=links,
             sessions=SessionTracker(redis),
+            accepted_counter=AcceptedCounter(redis),
         )
 
     async def close(self) -> None:
         # Buffers first: they must drain into Redis before Redis is closed.
+        # The audit counter goes with them — a count lost on shutdown would make
+        # the reconciliation job report loss that the shutdown caused.
+        await self.accepted_counter.flush()
         await self.buffer.stop()
         await self.click_buffer.stop()
         await self.links.stop()
