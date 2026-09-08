@@ -118,6 +118,18 @@ fraud_findings = Counter(
     registry=REGISTRY,
 )
 
+# --- skadnetwork --------------------------------------------------------
+skan_postbacks = Counter(
+    "mmp_skan_postbacks_total",
+    "SKAdNetwork postbacks received, by outcome.",
+    # stored | stored_nonwinner | duplicate | rejected | unknown_app |
+    # malformed | oversized — a closed set, and no tenant label: this endpoint
+    # is public, so a label an anonymous caller controls is a way to blow up
+    # metric cardinality from the internet.
+    ["outcome"],
+    registry=REGISTRY,
+)
+
 # --- outbound -----------------------------------------------------------
 deliveries = Counter(
     "mmp_deliveries_total",
