@@ -24,9 +24,31 @@ import { randomString } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8001';
 const API_KEY = __ENV.API_KEY;
 const BATCH_SIZE = parseInt(__ENV.BATCH_SIZE || '20', 10);
+const TRACKING_CODE = __ENV.TRACKING_CODE;
+
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile';
 
 export const options = {
   scenarios: {
+    // The redirect gets its own scenario and its own, tighter threshold. It is
+    // the only endpoint whose latency is experienced by an advertiser's
+    // customers rather than by the advertiser, and the only one where being
+    // slow costs conversions directly: a person waiting on a store page leaves.
+    redirect: {
+      executor: 'ramping-arrival-rate',
+      exec: 'redirect',
+      startRate: 100,
+      timeUnit: '1s',
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+      stages: [
+        { target: 1000, duration: '30s' },
+        { target: 3000, duration: '1m' },
+        { target: 3000, duration: '2m' },
+        { target: 0, duration: '30s' },
+      ],
+    },
     // Ramp to a sustained rate rather than an open flood: arrival-rate load
     // reveals the point where latency degrades, which is the number that
     // matters for capacity planning. A fixed number of VUs just measures
@@ -47,7 +69,12 @@ export const options = {
   },
   thresholds: {
     // The published SLO. Stated in the integration docs, so it is a promise.
-    'http_req_duration': ['p(99)<120', 'p(95)<60'],
+    'http_req_duration{endpoint:ingest}': ['p(99)<120', 'p(95)<60'],
+    // Tighter, because this one is in front of a person who is waiting.
+    'http_req_duration{endpoint:redirect}': ['p(99)<80', 'p(95)<40'],
+    // A redirect that fails is a conversion that never happens. There is no
+    // retry: the person is already gone.
+    'http_req_failed{endpoint:redirect}': ['rate<0.0001'],
     // Ingestion returning errors under load is worse than being slow: the SDK
     // will retry, and a retry storm on a struggling service is how a brownout
     // becomes an outage.
@@ -83,6 +110,26 @@ export default function () {
   check(response, {
     'accepted': (r) => r.status === 202,
     'not rate limited': (r) => r.status !== 429,
+  });
+}
+
+export function redirect() {
+  if (!TRACKING_CODE) {
+    throw new Error('set TRACKING_CODE, e.g. -e TRACKING_CODE=abc123...');
+  }
+
+  const response = http.get(`${BASE_URL}/c/${TRACKING_CODE}`, {
+    headers: { 'User-Agent': ANDROID_UA },
+    // Do not follow: the store is not ours to load-test, and following would
+    // measure Google's latency rather than ours.
+    redirects: 0,
+    tags: { endpoint: 'redirect' },
+  });
+
+  check(response, {
+    'redirected': (r) => r.status === 302,
+    'carries a click id': (r) =>
+      (r.headers['Location'] || '').includes('utm_content'),
   });
 }
 

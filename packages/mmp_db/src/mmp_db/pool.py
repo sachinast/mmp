@@ -34,9 +34,13 @@ log = get_logger(__name__)
 class Database:
     """An asyncpg pool bound to one application role."""
 
-    def __init__(self, pool: asyncpg.Pool[Any], *, role: str) -> None:
+    def __init__(self, pool: asyncpg.Pool[Any], *, role: str, dsn: str = "") -> None:
         self._pool = pool
         self.role = role
+        # Kept so that callers needing a *dedicated* connection can open one.
+        # LISTEN is connection-scoped: a subscription on a pooled connection is
+        # lost the moment that connection is handed to someone else.
+        self.dsn = dsn
 
     @classmethod
     async def connect(
@@ -62,7 +66,7 @@ class Database:
         if pool is None:  # pragma: no cover — asyncpg only returns None on misuse
             raise RuntimeError("failed to create connection pool")
         log.info("db_pool_ready", role=role, min_size=pool.get_min_size())
-        return cls(pool, role=role)
+        return cls(pool, role=role, dsn=settings.asyncpg_dsn())
 
     async def close(self) -> None:
         await self._pool.close()

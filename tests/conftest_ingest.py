@@ -76,8 +76,38 @@ async def seeded_app(owner_conn, ingest_redis):
         generated.key_hash,
     )
 
+    # A campaign and an active tracking link, so redirect tests have something
+    # to resolve without going through the API.
+    campaign_id, link_id = uuid7(), uuid7()
+    tracking_code = f"code{secrets.token_hex(8)}"
+    await owner_conn.execute(
+        """INSERT INTO campaigns (id, organization_id, app_id, name, source, medium, status)
+           VALUES ($1, $2, $3, $4, 'meta', 'cpi', 'active')""",
+        campaign_id,
+        org_id,
+        app_id,
+        f"Campaign {suffix}",
+    )
+    await owner_conn.execute(
+        """INSERT INTO tracking_links (id, organization_id, app_id, campaign_id, tracking_code,
+                                       name, android_url, ios_url, fallback_url,
+                                       deep_link_path, status)
+           VALUES ($1, $2, $3, $4, $5, 'Link', $6, $7, $8, '/offer/1', 'active')""",
+        link_id,
+        org_id,
+        app_id,
+        campaign_id,
+        tracking_code,
+        "https://play.google.com/store/apps/details?id=com.example.ingest",
+        "https://apps.apple.com/app/id123456789",
+        "https://example.com/landing",
+    )
+
     yield {
         "organization_id": org_id,
+        "campaign_id": campaign_id,
+        "tracking_link_id": link_id,
+        "tracking_code": tracking_code,
         "app_id": app_id,
         "api_key": generated.raw,
         "settings": settings,
@@ -86,6 +116,7 @@ async def seeded_app(owner_conn, ingest_redis):
     }
 
     await owner_conn.execute("DELETE FROM events WHERE app_id = $1", app_id)
+    await owner_conn.execute("DELETE FROM clicks WHERE app_id = $1", app_id)
     await owner_conn.execute("DELETE FROM organizations WHERE id = $1", org_id)
 
 
@@ -123,9 +154,31 @@ async def worker_consumer(ingest_redis, seeded_app):
 
 
 async def flush_tracker(client: httpx.AsyncClient) -> None:
-    """Force the shipping buffer out to Redis without waiting for its timer."""
+    """Force both shipping buffers out to Redis without waiting for the timer."""
     state = client.tracker_app.state.tracker  # type: ignore[attr-defined]
     await state.buffer._flush_once()
+    await state.click_buffer._flush_once()
+
+
+@pytest_asyncio.fixture
+async def click_consumer(ingest_redis, seeded_app):
+    from mmp_db.pool import Database
+    from mmp_worker.consumers import ClickConsumer
+
+    database = await Database.connect(seeded_app["worker_settings"], role="mmp_worker")
+    consumer = ClickConsumer(
+        redis=ingest_redis, database=database, consumer_name="test-clicks", idle_sleep=0.01
+    )
+    await consumer.start()
+    try:
+        yield consumer
+    finally:
+        await database.close()
+
+
+ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile"
+IOS_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15"
+DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120"
 
 
 def sample_event(**overrides) -> dict:

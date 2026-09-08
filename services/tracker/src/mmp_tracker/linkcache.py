@@ -1,0 +1,251 @@
+"""The tracking-link cache.
+
+The redirect handler must not query Postgres. A tracking link is read on every
+click and changes perhaps monthly, so a database round trip per redirect would
+be the single largest item in the latency budget, and it would tie the
+availability of every advertiser's campaign to the availability of our database.
+
+So the whole active link set lives in a dict in each tracker process. It is
+small — a few hundred bytes per link, so a hundred thousand links is tens of
+megabytes — and it is kept fresh two ways:
+
+* **``LISTEN``/``NOTIFY``.** A trigger on ``tracking_links`` notifies on every
+  insert, update and delete. Propagation is typically milliseconds, which is
+  what makes "I disabled that link" mean something.
+* **A periodic full resync.** Notifications are fire-and-forget: a process that
+  was disconnected when one was sent never learns about it. The resync bounds
+  how long a missed notification can matter, and is the reason this design is
+  safe rather than merely fast.
+
+A miss falls through to one indexed lookup and populates the cache, so a link
+created a second ago still works before the notification arrives.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import datetime as dt
+from dataclasses import dataclass
+
+import asyncpg
+from mmp_core.logging import get_logger
+from mmp_db.pool import Database
+from mmp_db.types import DbConn
+
+log = get_logger(__name__)
+
+CHANNEL = "tracking_links_changed"
+RESYNC_INTERVAL = dt.timedelta(minutes=5)
+# A negative entry, so a flood of requests for a code that does not exist cannot
+# be turned into a flood of database lookups. Short, because a link created a
+# moment ago must start working quickly.
+NEGATIVE_TTL = dt.timedelta(seconds=30)
+
+# Written out in full rather than composed from a shared prefix. The repo bans
+# f-string SQL outside mmp_db's reviewed builders, and appending a WHERE clause
+# to a shared string is exactly the habit that ban exists to prevent — even
+# here, where nothing interpolated comes from a request.
+LOAD_ONE_SQL = """
+SELECT l.id, l.tracking_code, l.organization_id, l.app_id, l.campaign_id,
+       l.android_url, l.ios_url, l.fallback_url, l.deep_link_path, l.status,
+       a.status AS app_status
+FROM tracking_links l
+JOIN apps a ON a.id = l.app_id
+WHERE l.tracking_code = $1
+"""
+
+# Both statuses, not just the link's. A link on a disabled app is inactive:
+# otherwise disabling an app would stop its ingestion while leaving its links
+# quietly sending traffic to a store listing nobody is measuring.
+LOAD_ACTIVE_SQL = """
+SELECT l.id, l.tracking_code, l.organization_id, l.app_id, l.campaign_id,
+       l.android_url, l.ios_url, l.fallback_url, l.deep_link_path, l.status,
+       a.status AS app_status
+FROM tracking_links l
+JOIN apps a ON a.id = l.app_id
+WHERE l.status = 'active' AND a.status = 'active'
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class CachedLink:
+    """Everything the redirect needs, resolved. Frozen so a handler cannot
+    accidentally mutate shared state, and slotted because there may be a lot
+    of these."""
+
+    id: str
+    organization_id: str
+    app_id: str
+    campaign_id: str | None
+    android_url: str | None
+    ios_url: str | None
+    fallback_url: str
+    deep_link_path: str | None
+    active: bool
+
+
+def _to_link(row: asyncpg.Record) -> CachedLink:
+    return CachedLink(
+        id=str(row["id"]),
+        organization_id=str(row["organization_id"]),
+        app_id=str(row["app_id"]),
+        campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
+        android_url=row["android_url"],
+        ios_url=row["ios_url"],
+        fallback_url=row["fallback_url"],
+        deep_link_path=row["deep_link_path"],
+        # A link on a disabled app is treated as disabled. Otherwise turning off
+        # an app would stop its ingestion but leave its links quietly sending
+        # traffic to a store listing nobody is measuring.
+        active=row["status"] == "active" and row["app_status"] == "active",
+    )
+
+
+class LinkCache:
+    def __init__(self, database: Database, *, resync: dt.timedelta = RESYNC_INTERVAL) -> None:
+        self._database = database
+        self._links: dict[str, CachedLink] = {}
+        self._missing: dict[str, dt.datetime] = {}
+        self._resync = resync
+        self._listener: asyncpg.Connection | None = None
+        self._tasks: list[asyncio.Task[None]] = []
+        self._stopping = False
+        self.loads = 0
+        self.notifications = 0
+        self.resyncs = 0
+
+    # --- lifecycle ------------------------------------------------------
+    async def start(self) -> None:
+        await self.resync()
+        with contextlib.suppress(Exception):
+            await self._start_listening()
+        self._tasks.append(asyncio.create_task(self._resync_loop(), name="linkcache-resync"))
+
+    async def stop(self) -> None:
+        self._stopping = True
+        for task in self._tasks:
+            task.cancel()
+        for task in self._tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._tasks.clear()
+        if self._listener is not None:
+            with contextlib.suppress(Exception):
+                await self._listener.close()
+            self._listener = None
+
+    async def _start_listening(self) -> None:
+        """A dedicated connection, held for the process's lifetime.
+
+        LISTEN is connection-scoped, so this cannot come from the shared pool —
+        a pooled connection would be handed to another caller and the
+        subscription lost with it.
+        """
+        self._listener = await asyncpg.connect(self._database.dsn, statement_cache_size=0)
+        await self._listener.add_listener(CHANNEL, self._on_notify)
+        log.info("linkcache_listening", channel=CHANNEL)
+
+    def _on_notify(self, _conn: object, _pid: int, _channel: str, payload: str) -> None:
+        """Callback from asyncpg's listener. Must not block.
+
+        The payload is the tracking code that changed; reloading just that one
+        keeps a busy dashboard from triggering a full resync per edit.
+        """
+        self.notifications += 1
+        self._missing.pop(payload, None)
+        task = asyncio.create_task(self._reload_one(payload), name="linkcache-reload")
+        self._tasks.append(task)
+        task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    async def _resync_loop(self) -> None:
+        while not self._stopping:
+            await asyncio.sleep(self._resync.total_seconds())
+            try:
+                await self.resync()
+            except Exception:
+                log.exception("linkcache_resync_failed")
+
+    # --- loading --------------------------------------------------------
+    async def resync(self) -> int:
+        """Replace the cache wholesale.
+
+        Built into a new dict and swapped in one assignment: mutating the live
+        dict would let a redirect observe a half-loaded cache and 404 a link
+        that exists.
+        """
+        async with self._database.acquire_raw() as conn:
+            rows = await conn.fetch(LOAD_ACTIVE_SQL)
+        # Filtered again on `active`, deliberately: the query already excludes
+        # disabled links and disabled apps, and this repeats the rule in Python.
+        # The redundancy is cheap and it is the layer that caught the bug —
+        # when the query filtered only on the link's own status, a disabled app
+        # kept its links live, and this filter is what made the test pass while
+        # the query was still wrong.
+        loaded = {}
+        for row in rows:
+            link = _to_link(row)
+            if link.active:
+                loaded[row["tracking_code"]] = link
+        self._links = loaded
+        self._missing.clear()
+        self.resyncs += 1
+        log.info("linkcache_resynced", links=len(self._links))
+        return len(self._links)
+
+    async def _reload_one(self, tracking_code: str) -> None:
+        async with self._database.acquire_raw() as conn:
+            row = await conn.fetchrow(LOAD_ONE_SQL, tracking_code)
+        if row is None:
+            self._links.pop(tracking_code, None)
+            return
+        link = _to_link(row)
+        if link.active:
+            self._links[tracking_code] = link
+        else:
+            # Disabled links are dropped rather than kept with a flag: the
+            # redirect's fast path is a dict lookup, and every branch it does
+            # not have to take is budget it does not spend.
+            self._links.pop(tracking_code, None)
+
+    # --- reads ----------------------------------------------------------
+    def get(self, tracking_code: str) -> CachedLink | None:
+        """The hot path. A dict lookup, nothing else."""
+        return self._links.get(tracking_code)
+
+    def is_known_missing(self, tracking_code: str, *, now: dt.datetime | None = None) -> bool:
+        expiry = self._missing.get(tracking_code)
+        if expiry is None:
+            return False
+        if (now or dt.datetime.now(dt.UTC)) > expiry:
+            self._missing.pop(tracking_code, None)
+            return False
+        return True
+
+    async def load_missing(self, tracking_code: str) -> CachedLink | None:
+        """Fall through to the database for a code the cache does not hold.
+
+        Reached when a link was created moments ago, or when this process
+        started after it was created but before the first resync.
+        """
+        async with self._database.acquire_raw() as conn:
+            row = await conn.fetchrow(LOAD_ONE_SQL, tracking_code)
+        self.loads += 1
+        if row is None:
+            self._missing[tracking_code] = dt.datetime.now(dt.UTC) + NEGATIVE_TTL
+            return None
+        link = _to_link(row)
+        if link.active:
+            self._links[tracking_code] = link
+            return link
+        self._missing[tracking_code] = dt.datetime.now(dt.UTC) + NEGATIVE_TTL
+        return None
+
+    @property
+    def size(self) -> int:
+        return len(self._links)
+
+
+async def notify_changed(conn: DbConn, tracking_code: str) -> None:
+    """Publish a change so every tracker process reloads that link."""
+    await conn.execute("SELECT pg_notify($1, $2)", CHANNEL, tracking_code)

@@ -12,7 +12,7 @@ import re
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, field_validator
 
 # Reverse-DNS, as both stores require. Validated here so a typo is a 422 at
 # registration rather than an attribution that silently never matches.
@@ -142,3 +142,74 @@ class ApiKeyCreated(ApiKeyOut):
 
     api_key: str
     warning: str = "Store this key now. It cannot be retrieved again."
+
+
+class CampaignCreate(BaseModel):
+    app_id: uuid.UUID
+    name: Annotated[str, Field(min_length=1, max_length=255)]
+    source: Annotated[str, Field(max_length=120)] | None = None
+    medium: Annotated[str, Field(max_length=120)] | None = None
+    external_campaign_id: Annotated[str, Field(max_length=255)] | None = None
+
+
+class CampaignOut(BaseModel):
+    id: uuid.UUID
+    app_id: uuid.UUID
+    name: str
+    source: str | None
+    medium: str | None
+    external_campaign_id: str | None
+    status: str
+    created_at: dt.datetime
+
+
+class TrackingLinkCreate(BaseModel):
+    campaign_id: uuid.UUID
+    name: Annotated[str, Field(min_length=1, max_length=255)]
+    # HttpUrl rather than str: these become 302 Location headers, and an
+    # unvalidated destination is an open redirect with our domain's reputation
+    # attached to it.
+    fallback_url: HttpUrl
+    android_url: HttpUrl | None = None
+    ios_url: HttpUrl | None = None
+    deep_link_path: Annotated[str, Field(max_length=512)] | None = None
+
+    @field_validator("fallback_url", "android_url", "ios_url")
+    @classmethod
+    def _https_only(cls, v: HttpUrl | None) -> HttpUrl | None:
+        # An http:// destination would have us redirect a user from a secure
+        # page to an insecure one, and would let anyone on the path rewrite the
+        # store link we just sent them to.
+        if v is not None and v.scheme != "https":
+            raise ValueError("destination URLs must use https")
+        return v
+
+
+class TrackingLinkUpdate(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    fallback_url: HttpUrl | None = None
+    android_url: HttpUrl | None = None
+    ios_url: HttpUrl | None = None
+    deep_link_path: Annotated[str, Field(max_length=512)] | None = None
+    status: Literal["active", "disabled"] | None = None
+
+    @field_validator("fallback_url", "android_url", "ios_url")
+    @classmethod
+    def _https_only(cls, v: HttpUrl | None) -> HttpUrl | None:
+        if v is not None and v.scheme != "https":
+            raise ValueError("destination URLs must use https")
+        return v
+
+
+class TrackingLinkOut(BaseModel):
+    id: uuid.UUID
+    app_id: uuid.UUID
+    campaign_id: uuid.UUID
+    tracking_code: str
+    name: str
+    android_url: str | None
+    ios_url: str | None
+    fallback_url: str
+    deep_link_path: str | None
+    status: str
+    created_at: dt.datetime

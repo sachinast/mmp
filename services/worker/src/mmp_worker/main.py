@@ -20,7 +20,7 @@ from mmp_db.pool import Database
 from redis.asyncio import Redis
 
 from mmp_core import configure_logging, get_logger, load_settings
-from mmp_worker.consumers import EventConsumer
+from mmp_worker.consumers import ClickConsumer, EventConsumer
 from mmp_worker.jobs import maintain_partitions, refresh_usage
 
 log = get_logger(__name__)
@@ -57,7 +57,11 @@ async def run(settings: Settings | None = None) -> None:
 
     database = await Database.connect(settings, role="mmp_worker")
     redis = Redis.from_url(str(settings.redis_url), decode_responses=False)
-    consumer = EventConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    events = EventConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    # A separate consumer, so a slow or failing event batch cannot delay click
+    # persistence. A late click is a missed attribution for every conversion
+    # that follows it.
+    clicks = ClickConsumer(redis=redis, database=database, consumer_name=consumer_name())
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -71,7 +75,8 @@ async def run(settings: Settings | None = None) -> None:
 
     log.info("worker_started", consumer=consumer_name(), version=settings.version)
     async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(consumer.run(), name="event-consumer")
+        tasks.create_task(events.run(), name="event-consumer")
+        tasks.create_task(clicks.run(), name="click-consumer")
         tasks.create_task(
             _every(
                 PARTITION_INTERVAL,
@@ -88,11 +93,16 @@ async def run(settings: Settings | None = None) -> None:
 
         await stop.wait()
         log.info("worker_draining")
-        await consumer.stop()
+        await events.stop()
+        await clicks.stop()
 
     await redis.aclose()
     await database.close()
-    log.info("worker_stopped", **consumer.metrics.as_dict())
+    log.info(
+        "worker_stopped",
+        events=events.metrics.as_dict(),
+        clicks=clicks.metrics.as_dict(),
+    )
 
 
 def main() -> None:

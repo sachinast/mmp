@@ -16,12 +16,21 @@ import asyncio
 import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import msgspec
 from mmp_core.logging import get_logger
 from mmp_db.pool import Database
+from mmp_db.types import DbConn
+from mmp_ingest.clicks import ClickWriter, QueuedClick
 from mmp_ingest.schema import QueuedEvent
-from mmp_ingest.stream import EVENTS_GROUP, EVENTS_STREAM, StreamConsumer
+from mmp_ingest.stream import (
+    CLICKS_GROUP,
+    CLICKS_STREAM,
+    EVENTS_GROUP,
+    EVENTS_STREAM,
+    StreamConsumer,
+)
 from mmp_ingest.writer import EventWriter
 from redis.asyncio import Redis
 
@@ -75,7 +84,7 @@ class EventConsumer:
         # How long to wait after an empty poll. Blocking reads are not used —
         # see StreamConsumer.read for why — so this is the queue's idle latency.
         self._idle_sleep = idle_sleep
-        self._consumer: StreamConsumer[QueuedEvent] = StreamConsumer(
+        self._consumer: StreamConsumer[Any] = StreamConsumer(
             redis,
             stream=EVENTS_STREAM,
             group=EVENTS_GROUP,
@@ -114,6 +123,12 @@ class EventConsumer:
             return 0
         return await self._process(messages)
 
+    async def _write(self, conn: DbConn, records: Sequence[object]) -> tuple[int, int]:
+        """Persist one batch. Overridden by ClickConsumer; everything else —
+        acknowledgement order, retries, dead-lettering — is shared."""
+        result = await self._writer.write(conn, list(records))  # type: ignore[arg-type]
+        return result.received, result.inserted
+
     async def _reclaim(self) -> None:
         messages = await self._consumer.claim_stalled(
             min_idle_ms=STALLED_AFTER_MS, count=self._batch_size
@@ -121,13 +136,13 @@ class EventConsumer:
         if messages:
             await self._process(messages)
 
-    async def _process(self, messages: Sequence[tuple[str, QueuedEvent]]) -> int:
+    async def _process(self, messages: Sequence[tuple[str, Any]]) -> int:
         message_ids = [message_id for message_id, _ in messages]
         events = [event for _, event in messages]
 
         try:
             async with self._database.acquire_raw() as conn:
-                result = await self._writer.write(conn, events)
+                received, inserted = await self._write(conn, events)
         except Exception:
             self.metrics.failures += 1
             log.exception("event_batch_write_failed", batch_size=len(events))
@@ -140,9 +155,9 @@ class EventConsumer:
             self._attempts.pop(message_id, None)
 
         self.metrics.batches += 1
-        self.metrics.events_received += result.received
-        self.metrics.events_written += result.inserted
-        self.metrics.duplicates += result.duplicates
+        self.metrics.events_received += received
+        self.metrics.events_written += inserted
+        self.metrics.duplicates += received - inserted
         self.metrics.last_batch_at = dt.datetime.now(dt.UTC)
         return len(messages)
 
@@ -186,3 +201,42 @@ class EventConsumer:
             # Back off before the redelivery so a database outage is not turned
             # into a tight retry loop against a database that is already unwell.
             await asyncio.sleep(min(2.0, 0.2 * max(self._attempts.values(), default=1)))
+
+
+class ClickConsumer(EventConsumer):
+    """The same machinery, pointed at the click stream.
+
+    Clicks and events differ in shape but not in what their write path has to
+    guarantee: ack after commit, dedup on redelivery, dead-letter a poison
+    message rather than stalling the group. Subclassing keeps one implementation
+    of those rules — the alternative is two copies that drift, and the one that
+    drifts is always the one nobody is looking at.
+    """
+
+    def __init__(
+        self,
+        *,
+        redis: Redis,
+        database: Database,
+        consumer_name: str,
+        batch_size: int = 5000,
+        idle_sleep: float = 0.1,
+    ) -> None:
+        super().__init__(
+            redis=redis,
+            database=database,
+            consumer_name=consumer_name,
+            batch_size=batch_size,
+            idle_sleep=idle_sleep,
+        )
+        self._consumer = StreamConsumer(
+            redis,
+            stream=CLICKS_STREAM,
+            group=CLICKS_GROUP,
+            consumer=consumer_name,
+            decoder_type=QueuedClick,
+        )
+        self._click_writer = ClickWriter()
+
+    async def _write(self, conn: DbConn, records: Sequence[object]) -> tuple[int, int]:
+        return await self._click_writer.write(conn, list(records))  # type: ignore[arg-type]

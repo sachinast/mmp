@@ -49,8 +49,10 @@ make audit     # dependency CVE scan against the lockfile
 make bench     # ingest latency regression gate
 ```
 
-`make bench` compares service latency against `infra/load/baseline.json`. It is
-a **regression gate, not an SLO check** — it runs a Python load generator against
+`make bench` compares median latency against `infra/load/baseline.json`. Only
+medians are gated — on a developer machine the tails are dominated by GC pauses
+and contention with the load generator, and a gate that fires on noise is one
+people learn to ignore. It is a **regression gate, not an SLO check** — it runs a Python load generator against
 a Python server on the same cores and is itself the bottleneck. Capacity and the
 published p99 < 120 ms SLO are measured with `infra/load/ingest.k6.js` against
 deployed infrastructure.
@@ -63,6 +65,31 @@ deployed infrastructure.
 | API key | HMAC-SHA256 under a KMS pepper | Verified on **every ingest request**. A slow hash here would be a self-inflicted denial of service; 256 bits of entropy does the work instead. |
 | Partner credentials | AES-256-GCM, KMS-wrapped DEK | Must be recoverable. Bound to the owning organisation, so a row copied to another tenant fails to decrypt. |
 | Session | Opaque token in Redis | Revocable. A JWT would make logout a lie. |
+
+## How a click becomes a redirect
+
+```
+GET /c/{code}  ->  dict lookup in the in-process link cache   (no database)
+               ->  mint a UUIDv7 click_id
+               ->  classify the user agent by substring       (no UA library)
+               ->  hash the IP; the raw address is discarded
+               ->  append to the click buffer                 (no await on Redis)
+               ->  302 to the store
+```
+
+Measured at **p50 2.4 ms** over loopback. Nothing in that path can block: the
+person on the other end is waiting to reach an app store, and every hundred
+milliseconds is a share of them who leave instead.
+
+The link cache is kept fresh by Postgres `LISTEN`/`NOTIFY` — so "I disabled that
+link" takes effect in milliseconds — with a five-minute full resync as the
+backstop, because notifications are fire-and-forget and a process that was
+disconnected never hears them.
+
+On Android the click id travels inside the Play Store `referrer` parameter and
+comes back through the Install Referrer API on first launch. That is what makes
+Android attribution deterministic. iOS has no equivalent channel, which is why
+it needs SKAdNetwork rather than a referrer — not an omission to fix later.
 
 ## How an event becomes a row
 
@@ -148,7 +175,7 @@ These are tests, not conventions. They fail the build:
 - [x] **Phase 1** — schema, partitioning, RLS and tenancy
 - [x] **Phase 2** — auth, organisations, apps, API keys
 - [x] **Phase 3** — ingest pipeline end to end
-- [ ] Phase 4 — campaigns, links, click tracking
+- [x] **Phase 4** — campaigns, links, click tracking
 - [ ] Phase 5 — attribution and Play Install Referrer
 - [ ] Phase 6 — sessions, rollups, analytics API
 - [ ] Phase 7 — dashboard

@@ -78,6 +78,14 @@ class ShippingBuffer:
     def depth(self) -> int:
         return len(self._queue)
 
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    def snapshot(self) -> tuple[msgspec.Struct, ...]:
+        """A copy of what is currently queued. For tests and diagnostics."""
+        return tuple(self._queue)
+
     async def start(self) -> None:
         self._stopping = False
         self._task = asyncio.create_task(self._run(), name="ingest-buffer-flush")

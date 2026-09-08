@@ -1,6 +1,8 @@
 {
-  "p50_ms": 2.42,
-  "p95_ms": 4.56,
-  "p99_ms": 17.11,
-  "events_per_second": 21806
+  "p50_ms": 2.38,
+  "p95_ms": 4.73,
+  "p99_ms": 17.37,
+  "redirect_p50_ms": 2.38,
+  "redirect_p95_ms": 4.69,
+  "events_per_second": 20971
 }

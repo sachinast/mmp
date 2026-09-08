@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from mmp_core.settings import Settings
 
 from mmp_api.context import AppContext
-from mmp_api.routes import apps, auth, keys, organizations
+from mmp_api.routes import apps, auth, campaigns, keys, organizations
 from mmp_core import (
     HealthRegistry,
     RequestContextMiddleware,
@@ -62,7 +62,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         log.exception("unhandled_exception", path=request.url.path)
         return JSONResponse({"error": "internal_error"}, status_code=500)
 
-    for router in (auth.router, organizations.router, apps.router, keys.router):
+    for router in (
+        auth.router,
+        organizations.router,
+        apps.router,
+        keys.router,
+        campaigns.router,
+    ):
         app.include_router(router, prefix="/v1")
 
     @app.get("/health", tags=["ops"])

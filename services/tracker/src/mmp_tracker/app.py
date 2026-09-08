@@ -32,6 +32,7 @@ from mmp_core import (
     unhandled_exception_handler,
 )
 from mmp_tracker.ingest import ingest_events
+from mmp_tracker.redirect import redirect_click
 from mmp_tracker.state import TrackerState
 
 
@@ -50,6 +51,7 @@ def create_app(settings: Settings | None = None) -> Starlette:
         registry.register("redis", state.ping_redis)
         registry.register("postgres", state.ping_database)
         registry.register("buffer", state.ping_buffer)
+        registry.register("links", state.ping_links)
         async with service_lifespan(
             registry,
             closers=[state.close],
@@ -64,16 +66,24 @@ def create_app(settings: Settings | None = None) -> Starlette:
         return JSONResponse(
             {
                 "accepted_total": state.accepted_total,
+                "clicks_total": state.clicks_total,
+                "unknown_codes": state.unknown_codes,
                 "buffer_depth": state.buffer.depth,
                 "buffer_shipped": state.buffer.shipped,
                 "buffer_dropped": state.buffer.dropped,
+                "click_buffer_depth": state.click_buffer.depth,
+                "click_buffer_dropped": state.click_buffer.dropped,
                 "failed_flushes": state.buffer.failed_flushes,
+                "cached_links": state.links.size,
+                "link_cache_loads": state.links.loads,
+                "link_cache_notifications": state.links.notifications,
             }
         )
 
     routes = [Route(path, handler) for path, handler in health_routes(registry)]
     routes += [
         Route("/v1/events", ingest_events, methods=["POST"]),
+        Route("/c/{tracking_code}", redirect_click, methods=["GET", "HEAD"]),
         Route("/internal/stats", stats, methods=["GET"]),
     ]
 
