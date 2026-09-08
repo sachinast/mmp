@@ -91,7 +91,17 @@ import UIKit
     /// The hardware identifier — "iPhone15,3" — rather than
     /// `UIDevice.current.model`, which returns "iPhone" for every iPhone ever
     /// made and is useless for the device breakdown this feeds.
+    ///
+    /// The simulator branch is not defensive tidying: running this on a
+    /// simulator showed `uname` returning the *host* architecture, so every
+    /// simulator install reported a device model of "arm64". That is a value
+    /// that means nothing in a report and, worse, one that looks like data.
+    /// Simulators publish the device they are pretending to be in an
+    /// environment variable, so that is used when it is there.
     private static func hardwareModel() -> String {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return simulated
+        }
         var systemInfo = utsname()
         uname(&systemInfo)
         let mirror = Mirror(reflecting: systemInfo.machine)

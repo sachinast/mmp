@@ -159,14 +159,18 @@ sends the same value and the server matches them all to each other.
 
 ### Verification status
 
-Be aware of what has and has not been run:
+- The JavaScript layer is unit-tested (`npm test`).
+- The iOS core is typechecked against the real iOS SDK (`make sdk-ios`) **and
+  executed on a simulator** (`make sdk-ios-device`). Running it is what found
+  that `uname` returns the host architecture on a simulator, so every simulator
+  install was reporting a device model of `arm64`.
+- The Kotlin has a standalone Gradle build (`make sdk-android`) but **has not
+  been compiled** on the machine this was written on — that needs a JDK 17–21
+  and a few GB free.
+- Neither native half has run on real hardware.
 
-- The JavaScript bridge layer is unit-tested (`npm test`).
-- The iOS core is typechecked against the real iOS SDK by `make sdk-ios`.
-- **The Kotlin is not compiled by any tooling in this repo** and neither native
-  half has been executed on a device. Both are additionally covered by static
-  source assertions in `tests/test_sdk_native_contract.py`, which is not the
-  same as running them. Device testing is outstanding work.
+`docs/DEVICE_TESTING.md` lists what only a real phone can verify, and why each
+one matters.
 
 ## Two operational notes
 

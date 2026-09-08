@@ -3,7 +3,7 @@
 PY := uv run
 UVICORN := $(PY) uvicorn --reload --env-file .env
 
-.PHONY: help setup check test lint fmt typecheck security audit sdk sdk-setup sdk-ios \
+.PHONY: help setup check test lint fmt typecheck security audit sdk sdk-setup sdk-ios sdk-ios-device sdk-android \
         tracker api web worker db-create db-reset infra-up infra-down
 
 help: ## Show this help
@@ -65,6 +65,46 @@ sdk: ## Typecheck and test the React Native SDK
 
 sdk-setup: ## Install the SDK's dev dependencies
 	cd $(SDK) && npm install --no-audit --no-fund
+
+sdk-ios-device: ## Run the iOS native core on a simulator and check its invariants
+# Real execution, not a typecheck. This is what found that `uname` returns the
+# host architecture on a simulator, so every simulator install was reporting a
+# device model of "arm64" — a value that means nothing but looks like data.
+#
+# One shell block, like sdk-android: make gives each recipe line its own shell,
+# so a skip in an earlier line cannot stop a later one.
+	@device=$$(xcrun simctl list devices available 2>/dev/null \
+	  | grep -m1 "iPhone" | grep -o "[0-9A-F-]\{36\}"); \
+	if [ -z "$$device" ]; then \
+	  echo "sdk-ios-device: skipped (no iOS simulator available)"; \
+	else \
+	  set -e; \
+	  xcrun simctl bootstatus $$device -b >/dev/null 2>&1 || true; \
+	  out=$$(mktemp -d); \
+	  trap "rm -rf $$out" EXIT; \
+	  xcrun --sdk iphonesimulator swiftc -target arm64-apple-ios16.0-simulator \
+	    -o $$out/DeviceCheck \
+	    $(SDK)/ios/MmpIdentifiers.swift $(SDK)/ios/DeviceCheck/main.swift; \
+	  xcrun simctl spawn $$device $$out/DeviceCheck; \
+	fi
+
+sdk-android: ## Compile the Android native module
+# One shell block on purpose: make runs each recipe line in its own shell, so an
+# `exit 0` in an earlier line does not skip the later ones — which is exactly
+# how the first version of this target ran gradle anyway and failed on a machine
+# that had deliberately been told it had no toolchain.
+	@sdk="$${ANDROID_HOME:-$$HOME/Library/Android/sdk}"; \
+	if [ -z "$$JAVA_HOME" ] || [ ! -x "$$JAVA_HOME/bin/java" ]; then \
+	  echo "sdk-android: skipped (set JAVA_HOME to a JDK 17-21; Gradle cannot run on 25)"; \
+	elif [ ! -d "$$sdk" ]; then \
+	  echo "sdk-android: skipped (no Android SDK; set ANDROID_HOME)"; \
+	elif ! command -v gradle >/dev/null 2>&1; then \
+	  echo "sdk-android: skipped (gradle not on PATH)"; \
+	else \
+	  cd $(SDK)/android && \
+	  echo "sdk.dir=$$sdk" > local.properties && \
+	  gradle --console=plain compileReleaseKotlin lintRelease; \
+	fi
 
 sdk-ios: ## Typecheck the iOS native core against the real iOS SDK
 # Only the core, which has no React dependency — the bridge shim needs React

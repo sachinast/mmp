@@ -1,39 +1,42 @@
-// Consumed by the host app through React Native autolinking.
-buildscript {
-    repositories { google(); mavenCentral() }
-    dependencies { classpath("com.android.tools.build:gradle:8.1.1") }
+// Consumed by a host app through React Native autolinking, and buildable on
+// its own so `make sdk-android` can compile and lint this module without a host
+// app in the way. The plugin versions are declared here rather than inherited
+// from the host, which a real integration overrides.
+plugins {
+    id "com.android.library" version "8.7.3"
+    id "org.jetbrains.kotlin.android" version "2.0.21"
 }
-
-apply plugin: "com.android.library"
-apply plugin: "kotlin-android"
 
 android {
     namespace "com.mmp"
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         // 21 rather than higher: this is a measurement SDK and raising the
         // floor would cut a host app off from devices it can otherwise serve.
         minSdk 21
-        targetSdk 34
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlin {
+        compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17 }
+    }
+
+    lint {
+        warningsAsErrors true
+        abortOnError true
+    }
 }
 
 dependencies {
-    implementation "com.facebook.react:react-android"
-
-    // Both are `compileOnly` on purpose. A measurement SDK that forces its own
-    // version of Play Services on a host app is a dependency conflict in
-    // someone else's release, and the classes are referenced through a
-    // try/catch that already handles their absence. An app that wants
-    // advertising-ID or install-referrer support adds them itself, which is
-    // also the app declaring that it wants that data collected.
+    // compileOnly throughout. A measurement SDK that forces its own version of
+    // React Native or Play Services on a host app is a dependency conflict in
+    // someone else's release; every one of these is reached through code that
+    // already handles its absence.
+    compileOnly "com.facebook.react:react-android:0.76.5"
     compileOnly "com.google.android.gms:play-services-ads-identifier:18.0.1"
     compileOnly "com.android.installreferrer:installreferrer:2.2"
 }
