@@ -1,0 +1,6089 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MMP API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register",
+        "description": "Create a user, their first organisation, and their owner membership.",
+        "operationId": "register_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/auth/logout-everywhere": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout Everywhere",
+        "description": "Revoke every session for this user.\n\nReal revocation is the reason sessions are server-side. This is what makes\n\"I think my laptop was stolen\" an action rather than a wait.",
+        "operationId": "logout_everywhere_v1_auth_logout_everywhere_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "operationId": "me_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List Organizations",
+        "description": "Every organisation this user belongs to.\n\nScoped by membership rather than by RLS: the caller has no active tenant yet\nat this point, which is exactly the state this endpoint exists to resolve.",
+        "operationId": "list_organizations_v1_organizations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Organizations V1 Organizations Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Create Organization",
+        "operationId": "create_organization_v1_organizations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/{organization_id}/switch": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Switch Organization",
+        "description": "Change the active organisation on the current session.\n\nMembership is re-checked here rather than trusted from the request: without\nthis check, switching would be a self-service grant of access to any\norganisation whose ID the caller can guess.",
+        "operationId": "switch_organization_v1_organizations__organization_id__switch_post",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Organization Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/members": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List Members",
+        "operationId": "list_members_v1_organizations_members_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Members V1 Organizations Members Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Add Member",
+        "description": "Add an existing user to this organisation.\n\nAn admin cannot grant a role above their own \u2014 otherwise \"admin\" is\nfunctionally \"owner\" via one extra call.",
+        "operationId": "add_member_v1_organizations_members_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberInvite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/organizations/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Remove Member",
+        "operationId": "remove_member_v1_organizations_members__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "List Apps",
+        "operationId": "list_apps_v1_apps_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Apps V1 Apps Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Create App",
+        "operationId": "create_app_v1_apps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{app_id}": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Get App",
+        "operationId": "get_app_v1_apps__app_id__get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Update App",
+        "operationId": "update_app_v1_apps__app_id__patch",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "summary": "Disable App",
+        "description": "Disable, never delete.\n\nDeleting an app would cascade to its campaigns and attribution history \u2014\nnumbers a client may have already reported to an ad network. Disabling stops\ningestion and leaves the record intact.",
+        "operationId": "disable_app_v1_apps__app_id__delete",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{app_id}/keys": {
+      "get": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "List Keys",
+        "description": "Keys are admin-visible only.\n\nA viewer can read analytics; a viewer who can enumerate key prefixes and\nrevoke credentials can take an advertiser's tracking offline.",
+        "operationId": "list_keys_v1_apps__app_id__keys_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Keys V1 Apps  App Id  Keys Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Create Key",
+        "operationId": "create_key_v1_apps__app_id__keys_post",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{app_id}/keys/{key_id}/rotate": {
+      "post": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Rotate Key",
+        "description": "Issue a replacement key and revoke the old one.\n\nRotation creates the new key *before* revoking the old one so that the\ncaller never holds zero working credentials. Overlap is the point: an app\nwith a live SDK cannot swap credentials atomically.",
+        "operationId": "rotate_key_v1_apps__app_id__keys__key_id__rotate_post",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{app_id}/keys/{key_id}": {
+      "delete": {
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Revoke Key",
+        "operationId": "revoke_key_v1_apps__app_id__keys__key_id__delete",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "List Campaigns",
+        "operationId": "list_campaigns_v1_campaigns_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignOut"
+                  },
+                  "title": "Response List Campaigns V1 Campaigns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Create Campaign",
+        "operationId": "create_campaign_v1_campaigns_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampaignCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tracking-links": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "List Links",
+        "operationId": "list_links_v1_tracking_links_get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackingLinkOut"
+                  },
+                  "title": "Response List Links V1 Tracking Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Create Link",
+        "operationId": "create_link_v1_tracking_links_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackingLinkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tracking-links/{link_id}": {
+      "patch": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Update Link",
+        "operationId": "update_link_v1_tracking_links__link_id__patch",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackingLinkUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Disable Link",
+        "description": "Disable, never delete.\n\nClicks already recorded reference this link, and an advertiser's historical\nreporting must not develop holes because someone tidied up.",
+        "operationId": "disable_link_v1_tracking_links__link_id__delete",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attributions/summary": {
+      "get": {
+        "tags": [
+          "attribution"
+        ],
+        "summary": "Summary",
+        "description": "Attribution counts by method over a bounded range.\n\nThe date range is required rather than defaulted. A default would be a\ndefault *scan*, and the first person to open this on a large advertiser\nwould discover how large by waiting for it.",
+        "operationId": "summary_v1_attributions_summary_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttributionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attributions/lookup": {
+      "get": {
+        "tags": [
+          "attribution"
+        ],
+        "summary": "Lookup Device",
+        "description": "Every attribution ever recorded for one device, newest first.\n\nIncludes superseded rows deliberately. \"It used to say organic and now it\nsays Meta\" is a question we must be able to answer with the record rather\nthan with an explanation, and the superseded chain is that record.",
+        "operationId": "lookup_device_v1_attributions_lookup_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "anonymous_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Anonymous Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AttributionOut"
+                  },
+                  "title": "Response Lookup Device V1 Attributions Lookup Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/overview": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Overview",
+        "operationId": "overview_v1_analytics_overview_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/campaigns": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Campaigns",
+        "operationId": "campaigns_v1_analytics_campaigns_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "To"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignRow"
+                  },
+                  "title": "Response Campaigns V1 Analytics Campaigns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/events": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Events",
+        "operationId": "events_v1_analytics_events_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "To"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventRow"
+                  },
+                  "title": "Response Events V1 Analytics Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/postback-rules": {
+      "get": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "List Rules",
+        "operationId": "list_rules_v1_postback_rules_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PostbackRuleOut"
+                  },
+                  "title": "Response List Rules V1 Postback Rules Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Create Rule",
+        "operationId": "create_rule_v1_postback_rules_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostbackRuleCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostbackRuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/postback-rules/{rule_id}": {
+      "patch": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Update Rule",
+        "operationId": "update_rule_v1_postback_rules__rule_id__patch",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostbackRuleUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostbackRuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Disable Rule",
+        "description": "Disable, not delete.\n\nDelivery rows reference this rule, and a deleted rule would leave an\nadvertiser unable to explain conversions their network already received.",
+        "operationId": "disable_rule_v1_postback_rules__rule_id__delete",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/postback-rules/{rule_id}/preview": {
+      "get": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Preview Rule",
+        "description": "Render the templates against sample values.\n\nLets someone see the URL their partner will actually receive before any real\nconversion depends on it \u2014 which is the difference between finding a\nmisplaced parameter now and finding it in a reconciliation meeting.",
+        "operationId": "preview_rule_v1_postback_rules__rule_id__preview_get",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/postback-deliveries": {
+      "get": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "List Deliveries",
+        "description": "Recent delivery attempts, newest first.\n\nBounded and never open-ended: this table is the busiest write target in the\nsystem, and an unpaginated listing of it is a query that gets slower every\nday until someone notices.",
+        "operationId": "list_deliveries_v1_postback_deliveries_get",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "in_flight",
+                    "delivered",
+                    "failed",
+                    "abandoned"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeliveryOut"
+                  },
+                  "title": "Response List Deliveries V1 Postback Deliveries Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/postback-deliveries/{delivery_id}/retry": {
+      "post": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Retry Delivery",
+        "description": "Queue one failed delivery for another attempt.\n\nOnly from a terminal failed state. Re-queueing something already in flight\nwould let an impatient click produce the duplicate conversion the whole\ndelivery design exists to prevent.",
+        "operationId": "retry_delivery_v1_postback_deliveries__delivery_id__retry_post",
+        "parameters": [
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Delivery Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "List Webhooks",
+        "operationId": "list_webhooks_v1_webhooks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Webhooks V1 Webhooks Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Create Webhook",
+        "operationId": "create_webhook_v1_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhook_id}/rotate": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Rotate Secret",
+        "description": "Issue a new signing secret.\n\nDeliveries are signed with the new secret immediately, so the receiver must\nbe updated first \u2014 there is no dual-signing period. That is a deliberate\nsimplification: accepting two secrets at once doubles the window in which a\nleaked one still works, and rotation is rare enough to coordinate.",
+        "operationId": "rotate_secret_v1_webhooks__webhook_id__rotate_post",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Webhook Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhook_id}": {
+      "patch": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Update Webhook",
+        "operationId": "update_webhook_v1_webhooks__webhook_id__patch",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Webhook Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Delete Webhook",
+        "description": "Genuinely deleted, unlike a postback rule.\n\nA webhook is the customer's own integration, not a record of what an ad\nnetwork was told. Nothing downstream needs to explain it later, and leaving\na disabled row holding an encrypted secret serves nobody.",
+        "operationId": "delete_webhook_v1_webhooks__webhook_id__delete",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Webhook Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/events": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Available Events",
+        "operationId": "available_events_v1_webhooks_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object",
+                  "title": "Response Available Events V1 Webhooks Events Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{webhook_id}/deliveries": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "List Deliveries",
+        "operationId": "list_deliveries_v1_webhooks__webhook_id__deliveries_get",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Webhook Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "in_flight",
+                    "delivered",
+                    "failed",
+                    "abandoned"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookDeliveryOut"
+                  },
+                  "title": "Response List Deliveries V1 Webhooks  Webhook Id  Deliveries Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/privacy/consent": {
+      "get": {
+        "tags": [
+          "privacy"
+        ],
+        "summary": "List Consent",
+        "description": "Everything a device has told this app, purpose by purpose.\n\nBoth parameters required: an unfiltered listing of consent records is a\nlisting of every device in the app, which is neither useful nor something\nthis endpoint should make easy.",
+        "operationId": "list_consent_v1_privacy_consent_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "anonymous_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Anonymous Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConsentOut"
+                  },
+                  "title": "Response List Consent V1 Privacy Consent Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "privacy"
+        ],
+        "summary": "Record Consent",
+        "description": "Record a decision made outside the SDK.\n\nA consent management platform, a support agent acting on a written request,\na backfill. The SDK's own path goes through the tracker as an ordinary\nevent; this is for everything else.",
+        "operationId": "record_consent_v1_privacy_consent_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/privacy/erasure": {
+      "post": {
+        "tags": [
+          "privacy"
+        ],
+        "summary": "Request Erasure",
+        "description": "Erase a device's data, and record that we did.\n\nAdmin-only: this is destructive and irreversible, and a viewer's job is to\nread reports.\n\nPerformed synchronously here because the volume for one device is small and\na caller answering a regulator wants a completed result, not a ticket. A\nbulk erasure \u2014 a whole app, a whole organisation \u2014 would need the async path\ndescribed in mmp_db.erasure, and does not exist yet.",
+        "operationId": "request_erasure_v1_privacy_erasure_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ErasureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErasureOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/privacy/audit/verify": {
+      "get": {
+        "tags": [
+          "privacy"
+        ],
+        "summary": "Verify Audit Chain",
+        "description": "Walk the audit chain and report the first entry that does not match.\n\nA chain nobody verifies is a chain nobody would notice was broken.",
+        "operationId": "verify_audit_chain_v1_privacy_audit_verify_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerification"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List Providers",
+        "description": "The adapters this build has.\n\nRead from the registry rather than a hard-coded list, so a deployment cannot\nadvertise an integration it cannot actually perform.",
+        "operationId": "list_providers_v1_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Providers V1 Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List Integrations",
+        "description": "Admin-only: an integration list is a list of which networks an advertiser\nworks with, which is commercially sensitive even without the credentials.",
+        "operationId": "list_integrations_v1_integrations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IntegrationOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Integrations V1 Integrations Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Create Integration",
+        "operationId": "create_integration_v1_integrations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/{integration_id}": {
+      "patch": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Update Integration",
+        "operationId": "update_integration_v1_integrations__integration_id__patch",
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Integration Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Delete Integration",
+        "description": "Deleting sets any rule using it back to the plain template path.\n\nThe foreign key is ON DELETE SET NULL rather than CASCADE, deliberately:\nremoving an integration should not silently delete the postback rules an\nadvertiser configured, and a rule with no provider still works.",
+        "operationId": "delete_integration_v1_integrations__integration_id__delete",
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Integration Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/{integration_id}/capabilities": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Integration Capabilities",
+        "description": "What this integration will accept.\n\nLets a dashboard refuse to attach a refund rule to a provider that does not\ntake refunds, rather than letting someone configure a delivery the network\nwill silently discard.",
+        "operationId": "integration_capabilities_v1_integrations__integration_id__capabilities_get",
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Integration Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Integration Capabilities V1 Integrations  Integration Id  Capabilities Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fraud/findings": {
+      "get": {
+        "tags": [
+          "fraud"
+        ],
+        "summary": "List Findings",
+        "operationId": "list_findings_v1_fraud_findings_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Finding"
+                  },
+                  "title": "Response List Findings V1 Fraud Findings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fraud/installs": {
+      "get": {
+        "tags": [
+          "fraud"
+        ],
+        "summary": "List Flagged Installs",
+        "operationId": "list_flagged_installs_v1_fraud_installs_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FlaggedInstall"
+                  },
+                  "title": "Response List Flagged Installs V1 Fraud Installs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deep-links": {
+      "get": {
+        "tags": [
+          "deeplinks"
+        ],
+        "summary": "List Deep Links",
+        "operationId": "list_deep_links_v1_deep_links_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeepLinkOut"
+                  },
+                  "title": "Response List Deep Links V1 Deep Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "deeplinks"
+        ],
+        "summary": "Create Deep Link",
+        "operationId": "create_deep_link_v1_deep_links_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeepLinkIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeepLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deep-links/{deep_link_id}": {
+      "delete": {
+        "tags": [
+          "deeplinks"
+        ],
+        "summary": "Delete Deep Link",
+        "operationId": "delete_deep_link_v1_deep_links__deep_link_id__delete",
+        "parameters": [
+          {
+            "name": "deep_link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Deep Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/exports/{dataset_name}": {
+      "get": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "Export Dataset",
+        "description": "Admin-only. An export is the whole dataset leaving the system, which is a\ndifferent act from reading a report, and should need a different level of\nauthority.",
+        "operationId": "export_dataset_v1_exports__dataset_name__get",
+        "parameters": [
+          {
+            "name": "dataset_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Name"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skan/conversion-values": {
+      "get": {
+        "tags": [
+          "skadnetwork"
+        ],
+        "summary": "List Conversion Values",
+        "operationId": "list_conversion_values_v1_skan_conversion_values_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConversionValueOut"
+                  },
+                  "title": "Response List Conversion Values V1 Skan Conversion Values Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "skadnetwork"
+        ],
+        "summary": "Set Conversion Value",
+        "description": "Upsert, not create.\n\nAn advertiser tunes this mapping repeatedly while working out what their 64\nvalues should mean, and a create-only endpoint would make every adjustment a\ndelete followed by a create \u2014 with a window in between where the event maps\nto nothing at all.",
+        "operationId": "set_conversion_value_v1_skan_conversion_values_put",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversionValueIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionValueOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skan/conversion-values/{mapping_id}": {
+      "delete": {
+        "tags": [
+          "skadnetwork"
+        ],
+        "summary": "Delete Conversion Value",
+        "operationId": "delete_conversion_value_v1_skan_conversion_values__mapping_id__delete",
+        "parameters": [
+          {
+            "name": "mapping_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mapping Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skan/postbacks": {
+      "get": {
+        "tags": [
+          "skadnetwork"
+        ],
+        "summary": "List Postbacks",
+        "operationId": "list_postbacks_v1_skan_postbacks_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PostbackOut"
+                  },
+                  "title": "Response List Postbacks V1 Skan Postbacks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skan/summary": {
+      "get": {
+        "tags": [
+          "skadnetwork"
+        ],
+        "summary": "Summarise",
+        "description": "Grouped by network and campaign, with the withheld values counted.\n\n``suppressed`` is reported rather than hidden: a campaign whose conversion\nvalues were mostly withheld has an average computed from the few that were\nnot, and an average over an unstated fraction of the data is exactly the\nkind of number that gets quoted without its denominator.",
+        "operationId": "summarise_v1_skan_summary_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkanSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Ready",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "default": "default"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "dev",
+              "prod"
+            ],
+            "title": "Environment",
+            "default": "dev"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sdk",
+              "s2s"
+            ],
+            "title": "Kind",
+            "default": "sdk"
+          }
+        },
+        "type": "object",
+        "title": "ApiKeyCreate"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          },
+          "warning": {
+            "type": "string",
+            "title": "Warning",
+            "default": "Store this key now. It cannot be retrieved again."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "name",
+          "kind",
+          "key_prefix",
+          "environment",
+          "status",
+          "last_used_at",
+          "created_at",
+          "api_key"
+        ],
+        "title": "ApiKeyCreated",
+        "description": "Returned exactly once, from the creation call only."
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "name",
+          "kind",
+          "key_prefix",
+          "environment",
+          "status",
+          "last_used_at",
+          "created_at"
+        ],
+        "title": "ApiKeyOut",
+        "description": "A stored key, as it can safely be shown again.\n\nNote the absence of any field that could reconstruct the credential. After\ncreation, the prefix is all we have and all anyone gets."
+      },
+      "AppCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios",
+              "cross_platform"
+            ],
+            "title": "Platform"
+          },
+          "android_package_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Package Name"
+          },
+          "ios_bundle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ios Bundle Id"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "install_window_days": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Install Window Days",
+            "default": 7
+          },
+          "event_window_days": {
+            "type": "integer",
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Event Window Days",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "platform"
+        ],
+        "title": "AppCreate"
+      },
+      "AppOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios",
+              "cross_platform"
+            ],
+            "title": "Platform"
+          },
+          "android_package_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Package Name"
+          },
+          "ios_bundle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ios Bundle Id"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "install_window_days": {
+            "type": "integer",
+            "title": "Install Window Days"
+          },
+          "event_window_days": {
+            "type": "integer",
+            "title": "Event Window Days"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "platform",
+          "android_package_name",
+          "ios_bundle_id",
+          "timezone",
+          "status",
+          "install_window_days",
+          "event_window_days",
+          "created_at"
+        ],
+        "title": "AppOut"
+      },
+      "AppUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "paused",
+                  "disabled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "install_window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 30.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Window Days"
+          },
+          "event_window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 90.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Window Days"
+          }
+        },
+        "type": "object",
+        "title": "AppUpdate"
+      },
+      "AttributionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "anonymous_id": {
+            "type": "string",
+            "title": "Anonymous Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "click_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Click Id"
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "tracking_link_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Link Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "medium": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium"
+          },
+          "installed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Installed At"
+          },
+          "attributed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Attributed At"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "anonymous_id",
+          "user_id",
+          "method",
+          "click_id",
+          "campaign_id",
+          "tracking_link_id",
+          "source",
+          "medium",
+          "installed_at",
+          "attributed_at",
+          "window_days",
+          "expires_at",
+          "superseded_by"
+        ],
+        "title": "AttributionOut"
+      },
+      "AttributionSummary": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date"
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "attributed": {
+            "type": "integer",
+            "title": "Attributed"
+          },
+          "organic": {
+            "type": "integer",
+            "title": "Organic"
+          },
+          "match_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Rate"
+          },
+          "by_method": {
+            "items": {
+              "$ref": "#/components/schemas/MethodBreakdown"
+            },
+            "type": "array",
+            "title": "By Method"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_date",
+          "to_date",
+          "total",
+          "attributed",
+          "organic",
+          "match_rate",
+          "by_method"
+        ],
+        "title": "AttributionSummary"
+      },
+      "AuditVerification": {
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "title": "Entries"
+          },
+          "intact": {
+            "type": "boolean",
+            "title": "Intact"
+          },
+          "broken_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broken At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Tamper-evident, not tamper-proof: anyone who can write to the table can also rewrite the chain from the point they altered."
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries",
+          "intact",
+          "broken_at"
+        ],
+        "title": "AuditVerification"
+      },
+      "CampaignCreate": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "medium": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium"
+          },
+          "external_campaign_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Campaign Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "name"
+        ],
+        "title": "CampaignCreate"
+      },
+      "CampaignOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "medium": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium"
+          },
+          "external_campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Campaign Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "name",
+          "source",
+          "medium",
+          "external_campaign_id",
+          "status",
+          "created_at"
+        ],
+        "title": "CampaignOut"
+      },
+      "CampaignRow": {
+        "properties": {
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Campaign Id"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "clicks": {
+            "type": "integer",
+            "title": "Clicks"
+          },
+          "installs": {
+            "type": "integer",
+            "title": "Installs"
+          },
+          "revenue_minor": {
+            "type": "integer",
+            "title": "Revenue Minor"
+          },
+          "conversions": {
+            "type": "integer",
+            "title": "Conversions"
+          },
+          "install_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaign_id",
+          "campaign_name",
+          "clicks",
+          "installs",
+          "revenue_minor",
+          "conversions",
+          "install_rate"
+        ],
+        "title": "CampaignRow"
+      },
+      "ConsentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "anonymous_id": {
+            "type": "string",
+            "title": "Anonymous Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "anonymous_id",
+          "purpose",
+          "state",
+          "source",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "ConsentOut"
+      },
+      "ConsentRecord": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "anonymous_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Anonymous Id"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "analytics",
+              "attribution",
+              "advertising"
+            ],
+            "title": "Purpose"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "granted",
+              "denied"
+            ],
+            "title": "State"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "anonymous_id",
+          "purpose",
+          "state"
+        ],
+        "title": "ConsentRecord"
+      },
+      "ConversionValueIn": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "event_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Event Name"
+          },
+          "conversion_value": {
+            "type": "integer",
+            "maximum": 63.0,
+            "minimum": 0.0,
+            "title": "Conversion Value"
+          },
+          "coarse_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coarse Value"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "default": "ios"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "event_name",
+          "conversion_value"
+        ],
+        "title": "ConversionValueIn"
+      },
+      "ConversionValueOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "event_name": {
+            "type": "string",
+            "title": "Event Name"
+          },
+          "conversion_value": {
+            "type": "integer",
+            "title": "Conversion Value"
+          },
+          "coarse_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coarse Value"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "event_name",
+          "conversion_value",
+          "coarse_value",
+          "platform"
+        ],
+        "title": "ConversionValueOut"
+      },
+      "DeepLinkIn": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Destination"
+          },
+          "fallback_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Fallback Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "code",
+          "destination",
+          "fallback_url"
+        ],
+        "title": "DeepLinkIn"
+      },
+      "DeepLinkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "destination": {
+            "type": "string",
+            "title": "Destination"
+          },
+          "fallback_url": {
+            "type": "string",
+            "title": "Fallback Url"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "code",
+          "destination",
+          "fallback_url",
+          "created_at"
+        ],
+        "title": "DeepLinkOut"
+      },
+      "DeliveryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "postback_rule_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Postback Rule Id"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Event Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url"
+          },
+          "response_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Status"
+          },
+          "response_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Body"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "postback_rule_id",
+          "event_id",
+          "status",
+          "attempt_count",
+          "request_url",
+          "response_status",
+          "response_body",
+          "error",
+          "created_at",
+          "delivered_at",
+          "next_retry_at"
+        ],
+        "title": "DeliveryOut"
+      },
+      "ErasureOut": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "deleted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Deleted"
+          },
+          "cleared": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Cleared"
+          },
+          "total_deleted": {
+            "type": "integer",
+            "title": "Total Deleted"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "scope",
+          "deleted",
+          "cleared",
+          "total_deleted",
+          "completed_at"
+        ],
+        "title": "ErasureOut"
+      },
+      "ErasureRequest": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "anonymous_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Anonymous Id"
+          },
+          "device_hash_hex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Hash Hex"
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "anonymous_id"
+        ],
+        "title": "ErasureRequest"
+      },
+      "EventRow": {
+        "properties": {
+          "event_name": {
+            "type": "string",
+            "title": "Event Name"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "peak_hourly_devices": {
+            "type": "integer",
+            "title": "Peak Hourly Devices"
+          },
+          "revenue_minor": {
+            "type": "integer",
+            "title": "Revenue Minor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_name",
+          "event_count",
+          "peak_hourly_devices",
+          "revenue_minor"
+        ],
+        "title": "EventRow"
+      },
+      "Finding": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "rule": {
+            "type": "string",
+            "title": "Rule"
+          },
+          "severity": {
+            "type": "integer",
+            "title": "Severity"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "tracking_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Code"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "rule",
+          "severity",
+          "detail",
+          "tracking_code",
+          "campaign_name",
+          "window_start",
+          "window_end"
+        ],
+        "title": "Finding"
+      },
+      "FlaggedInstall": {
+        "properties": {
+          "attribution_id": {
+            "type": "string",
+            "title": "Attribution Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "installed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Installed At"
+          },
+          "fraud_score": {
+            "type": "integer",
+            "title": "Fraud Score"
+          },
+          "fraud_verdict": {
+            "type": "string",
+            "title": "Fraud Verdict"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attribution_id",
+          "method",
+          "installed_at",
+          "fraud_score",
+          "fraud_verdict",
+          "rules"
+        ],
+        "title": "FlaggedInstall"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IntegrationCreate": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Credentials"
+          },
+          "configuration": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Configuration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "name"
+        ],
+        "title": "IntegrationCreate"
+      },
+      "IntegrationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "configuration": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Configuration"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "last_health_check_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Health Check At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "credential_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Credential Names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "configuration",
+          "status",
+          "last_health_check_at",
+          "created_at"
+        ],
+        "title": "IntegrationOut"
+      },
+      "IntegrationUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentials"
+          },
+          "configuration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(active|paused)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "title": "IntegrationUpdate"
+      },
+      "Login": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "Login"
+      },
+      "MemberInvite": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "default": "member"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "MemberInvite"
+      },
+      "MemberOut": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "email",
+          "name",
+          "role"
+        ],
+        "title": "MemberOut"
+      },
+      "MethodBreakdown": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "count"
+        ],
+        "title": "MethodBreakdown"
+      },
+      "OrganizationCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "UTC"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OrganizationCreate"
+      },
+      "OrganizationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member",
+                  "viewer"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "timezone"
+        ],
+        "title": "OrganizationOut"
+      },
+      "Overview": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date"
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
+          },
+          "series": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_date",
+          "to_date",
+          "totals",
+          "series"
+        ],
+        "title": "Overview"
+      },
+      "PostbackOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "ad_network_id": {
+            "type": "string",
+            "title": "Ad Network Id"
+          },
+          "source_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Identifier"
+          },
+          "did_win": {
+            "type": "boolean",
+            "title": "Did Win"
+          },
+          "redownload": {
+            "type": "boolean",
+            "title": "Redownload"
+          },
+          "conversion_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversion Value"
+          },
+          "coarse_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coarse Value"
+          },
+          "postback_sequence_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postback Sequence Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "received_at",
+          "version",
+          "ad_network_id",
+          "source_identifier",
+          "did_win",
+          "redownload",
+          "conversion_value",
+          "coarse_value",
+          "postback_sequence_index"
+        ],
+        "title": "PostbackOut"
+      },
+      "PostbackRuleCreate": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "trigger_event": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Trigger Event"
+          },
+          "url_template": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Url Template"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST"
+            ],
+            "title": "Method",
+            "default": "GET"
+          },
+          "body_template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Template"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "success_status_codes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Success Status Codes"
+          },
+          "requires_attribution": {
+            "type": "boolean",
+            "title": "Requires Attribution",
+            "default": true
+          },
+          "is_sandbox": {
+            "type": "boolean",
+            "title": "Is Sandbox",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "app_id",
+          "name",
+          "trigger_event",
+          "url_template"
+        ],
+        "title": "PostbackRuleCreate"
+      },
+      "PostbackRuleOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "provider_integration_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Integration Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "trigger_event": {
+            "type": "string",
+            "title": "Trigger Event"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "url_template": {
+            "type": "string",
+            "title": "Url Template"
+          },
+          "body_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Template"
+          },
+          "success_status_codes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Success Status Codes"
+          },
+          "requires_attribution": {
+            "type": "boolean",
+            "title": "Requires Attribution"
+          },
+          "is_sandbox": {
+            "type": "boolean",
+            "title": "Is Sandbox"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "header_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Header Names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "provider_integration_id",
+          "name",
+          "trigger_event",
+          "method",
+          "url_template",
+          "body_template",
+          "success_status_codes",
+          "requires_attribution",
+          "is_sandbox",
+          "enabled",
+          "created_at"
+        ],
+        "title": "PostbackRuleOut"
+      },
+      "PostbackRuleUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "trigger_event": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Event"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "POST"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "url_template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url Template"
+          },
+          "body_template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Template"
+          },
+          "requires_attribution": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Attribution"
+          },
+          "is_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Sandbox"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "PostbackRuleUpdate"
+      },
+      "ProviderInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "auth_style": {
+            "type": "string",
+            "title": "Auth Style"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "event_map": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Event Map"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "display_name",
+          "auth_style",
+          "capabilities",
+          "event_map"
+        ],
+        "title": "ProviderInfo"
+      },
+      "Registration": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 12,
+            "title": "Password"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "organization_name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Organization Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "name",
+          "organization_name"
+        ],
+        "title": "Registration"
+      },
+      "SkanSummary": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SkanSummaryRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "caveat": {
+            "type": "string",
+            "title": "Caveat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "caveat"
+        ],
+        "title": "SkanSummary"
+      },
+      "SkanSummaryRow": {
+        "properties": {
+          "ad_network_id": {
+            "type": "string",
+            "title": "Ad Network Id"
+          },
+          "source_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Identifier"
+          },
+          "winning_postbacks": {
+            "type": "integer",
+            "title": "Winning Postbacks"
+          },
+          "non_winning_postbacks": {
+            "type": "integer",
+            "title": "Non Winning Postbacks"
+          },
+          "redownloads": {
+            "type": "integer",
+            "title": "Redownloads"
+          },
+          "average_conversion_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Conversion Value"
+          },
+          "suppressed": {
+            "type": "integer",
+            "title": "Suppressed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ad_network_id",
+          "source_identifier",
+          "winning_postbacks",
+          "non_winning_postbacks",
+          "redownloads",
+          "average_conversion_value",
+          "suppressed"
+        ],
+        "title": "SkanSummaryRow"
+      },
+      "TemplatePreview": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "variables_used": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables Used"
+          },
+          "available_variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Variables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "body",
+          "variables_used",
+          "available_variables"
+        ],
+        "title": "TemplatePreview"
+      },
+      "Totals": {
+        "properties": {
+          "clicks": {
+            "type": "integer",
+            "title": "Clicks"
+          },
+          "installs": {
+            "type": "integer",
+            "title": "Installs"
+          },
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "peak_hourly_devices": {
+            "type": "integer",
+            "title": "Peak Hourly Devices"
+          },
+          "revenue_minor": {
+            "type": "integer",
+            "title": "Revenue Minor"
+          },
+          "conversions": {
+            "type": "integer",
+            "title": "Conversions"
+          },
+          "install_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "clicks",
+          "installs",
+          "sessions",
+          "events",
+          "peak_hourly_devices",
+          "revenue_minor",
+          "conversions",
+          "install_rate"
+        ],
+        "title": "Totals"
+      },
+      "TrackingLinkCreate": {
+        "properties": {
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Campaign Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "fallback_url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Fallback Url"
+          },
+          "android_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Url"
+          },
+          "ios_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ios Url"
+          },
+          "deep_link_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Link Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaign_id",
+          "name",
+          "fallback_url"
+        ],
+        "title": "TrackingLinkCreate"
+      },
+      "TrackingLinkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "App Id"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Campaign Id"
+          },
+          "tracking_code": {
+            "type": "string",
+            "title": "Tracking Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "android_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Url"
+          },
+          "ios_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ios Url"
+          },
+          "fallback_url": {
+            "type": "string",
+            "title": "Fallback Url"
+          },
+          "deep_link_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Link Path"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "app_id",
+          "campaign_id",
+          "tracking_code",
+          "name",
+          "android_url",
+          "ios_url",
+          "fallback_url",
+          "deep_link_path",
+          "status",
+          "created_at"
+        ],
+        "title": "TrackingLinkOut"
+      },
+      "TrackingLinkUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "fallback_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Url"
+          },
+          "android_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Url"
+          },
+          "ios_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ios Url"
+          },
+          "deep_link_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Link Path"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "disabled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "title": "TrackingLinkUpdate"
+      },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name",
+          "created_at"
+        ],
+        "title": "UserOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WebhookCreate": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Url"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "events"
+        ],
+        "title": "WebhookCreate"
+      },
+      "WebhookCreated": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "title": "Consecutive Failures"
+          },
+          "disabled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "failures_before_disable": {
+            "type": "integer",
+            "title": "Failures Before Disable",
+            "default": 20
+          },
+          "signing_secret": {
+            "type": "string",
+            "title": "Signing Secret"
+          },
+          "verification_example": {
+            "type": "string",
+            "title": "Verification Example"
+          },
+          "warning": {
+            "type": "string",
+            "title": "Warning",
+            "default": "Store this secret now. It cannot be retrieved again."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "events",
+          "enabled",
+          "consecutive_failures",
+          "disabled_at",
+          "created_at",
+          "signing_secret",
+          "verification_example"
+        ],
+        "title": "WebhookCreated",
+        "description": "Returned once, from creation and rotation only."
+      },
+      "WebhookDeliveryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "webhook_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Webhook Id"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Event Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count"
+          },
+          "response_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Status"
+          },
+          "response_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Body"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "webhook_id",
+          "event_id",
+          "event_type",
+          "status",
+          "attempt_count",
+          "response_status",
+          "response_body",
+          "error",
+          "created_at",
+          "delivered_at",
+          "next_retry_at"
+        ],
+        "title": "WebhookDeliveryOut"
+      },
+      "WebhookOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "title": "Consecutive Failures"
+          },
+          "disabled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "failures_before_disable": {
+            "type": "integer",
+            "title": "Failures Before Disable",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "events",
+          "enabled",
+          "consecutive_failures",
+          "disabled_at",
+          "created_at"
+        ],
+        "title": "WebhookOut"
+      },
+      "WebhookUpdate": {
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "WebhookUpdate"
+      }
+    }
+  }
+}
