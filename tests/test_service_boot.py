@@ -63,3 +63,25 @@ async def test_incoming_correlation_id_is_adopted():
     ):
         response = await client.get("/health", headers={"x-correlation-id": "trace-abc"})
     assert response.headers["x-correlation-id"] == "trace-abc"
+
+
+async def test_the_api_root_points_somewhere_useful(api_client):
+    """A bare 404 at the root is correct and unhelpful. The first thing someone
+    does after one is check whether they got the port wrong."""
+    response = await api_client.get("/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["service"] == "api"
+    assert body["documentation"] == "/docs"
+
+
+async def test_the_tracker_root_does_not_enumerate_its_ingest_surface(tracker):
+    """The tracker is the service on the public internet. It names itself so a
+    developer is not lost, and stops there — listing its endpoints for an
+    anonymous caller who has not been given a key buys nothing."""
+    response = await tracker.get("/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["service"] == "tracker"
+    for path in ("/v1/events", "/v1/s2s/events", "/v1/deeplink/resolve", "/c/"):
+        assert path not in response.text, f"the root advertises {path}"

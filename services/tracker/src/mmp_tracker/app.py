@@ -18,7 +18,7 @@ from mmp_core.settings import Settings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from mmp_core import (
@@ -38,6 +38,24 @@ from mmp_tracker.redirect import redirect_click
 from mmp_tracker.s2s import ingest_s2s
 from mmp_tracker.skan import receive_postback
 from mmp_tracker.state import TrackerState
+
+
+async def service_root(request: Request) -> Response:
+    """A signpost for anyone who lands on the tracker by hand.
+
+    Deliberately says less than the API's equivalent. This service is the one
+    on the public internet, so it names itself and the dashboard and stops
+    there — it does not enumerate its own ingest surface for an anonymous
+    caller who has not been given a key.
+    """
+    return JSONResponse(
+        {
+            "service": "tracker",
+            "health": "/health",
+            "note": "Event ingest and click redirects. Endpoints require an app key.",
+        },
+        headers={"cache-control": "no-store"},
+    )
 
 
 def create_app(settings: Settings | None = None) -> Starlette:
@@ -111,6 +129,7 @@ def create_app(settings: Settings | None = None) -> Starlette:
     app_holder: dict[str, object] = {}
     routes = [Route(path, handler) for path, handler in health_routes(registry)]
     routes += [
+        Route("/", service_root, methods=["GET"]),
         Route("/v1/events", ingest_events, methods=["POST"]),
         Route("/v1/s2s/events", ingest_s2s, methods=["POST"]),
         Route("/v1/deeplink/resolve", resolve_deferred, methods=["POST"]),

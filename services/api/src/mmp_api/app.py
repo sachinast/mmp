@@ -97,6 +97,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         app.include_router(router, prefix="/v1")
 
+    @app.get("/", include_in_schema=False)
+    async def root() -> dict[str, str]:
+        """A signpost, not an endpoint.
+
+        Everything real lives under /v1. A bare 404 here is correct but tells
+        someone poking at the service nothing, and the first thing they do next
+        is check whether they got the port wrong.
+        """
+        return {
+            "service": "api",
+            "version": settings.version,
+            "documentation": "/docs",
+            "schema": "/openapi.json",
+            "health": "/health",
+            "note": "Endpoints are under /v1 and need a session; see /docs.",
+        }
+
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "api", "version": settings.version}
