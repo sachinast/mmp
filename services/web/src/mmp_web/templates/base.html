@@ -125,13 +125,46 @@
                        border: 1px solid var(--border); }
     code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
            background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
-    /* preserveAspectRatio="none" scales glyphs with the geometry, so the SVG
-       holds no text at all — the labels below are HTML and stay legible. */
-    .chart { display: block; width: 100%; height: 160px; }
-    .chart-peak { color: var(--muted); font-size: 11px;
-                  font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+    /* Bars in normal flow, not a stretched SVG. A percentage height is exact
+       at any container width, so nothing distorts — the earlier SVG was scaled
+       to fit and turned a single day's data into a full-width slab. */
+    .chart { display: flex; gap: 10px; height: 170px; }
+    .chart-scale {
+      display: flex; flex-direction: column; justify-content: space-between;
+      color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+      text-align: right; min-width: 34px;
+      /* Half a line, so each number sits on its gridline rather than above it. */
+      margin: -0.5em 0;
+    }
+    .chart-plot { position: relative; flex: 1; min-width: 0; }
+    .gridline {
+      position: absolute; left: 0; right: 0; height: 1px;
+      background: var(--border); pointer-events: none;
+    }
+    .bars {
+      position: absolute; inset: 0; display: flex; align-items: flex-end;
+      /* Centred, so a short series sits in the middle of the plot instead of
+         hugging the left with dead space beside it. */
+      justify-content: center;
+      gap: 3px; border-bottom: 1px solid var(--border);
+    }
+    /* Capped, so a week is seven bars rather than seven walls. Without the cap
+       a single day fills the entire plot, which is the bug this chart was
+       rewritten for. */
+    .bars .bar {
+      flex: 1 1 0; max-width: 56px; height: 100%;
+      display: flex; align-items: flex-end;
+    }
+    .bars .fill {
+      width: 100%; background: var(--accent); border-radius: 2px 2px 0 0;
+      min-height: 2px; transition: opacity .12s;
+    }
+    .bars .bar:hover .fill { opacity: .78; }
+    /* A day with no volume: visible as a stub, so a gap reads as "nothing
+       happened" rather than as data that failed to load. */
+    .bars .fill.empty { min-height: 1px; background: var(--border); }
     .chart-axis { display: flex; justify-content: space-between;
-                  color: var(--muted); font-size: 11px; margin-top: 4px; }
+                  color: var(--muted); font-size: 11px; margin-top: 6px; }
     .htmx-request .loading { display: block; }
     .loading { display: none; color: var(--muted); font-size: 12px; padding: 8px 0; }
     .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }

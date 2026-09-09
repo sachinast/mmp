@@ -255,21 +255,58 @@ def test_chart_escapes_its_labels():
 def test_chart_handles_an_all_zero_series():
     """A flat series must render as a flat line, not divide by zero."""
     markup = bar_chart([{"day": "2026-09-01", "events": 0}, {"day": "2026-09-02", "events": 0}])
-    assert "<svg" in markup
-    assert "<rect" in markup, "a zero bar should still be drawn, flat"
+    assert markup.count('class="bar"') == 2, "a zero day is still a day on the axis"
+    assert "height:0.00%" in markup
 
 
-def test_chart_puts_no_text_inside_the_svg():
-    """preserveAspectRatio="none" scales glyphs with the geometry.
+def test_a_single_day_is_one_bar_not_a_wall():
+    """The bug this chart was rewritten for.
 
-    The first version had the axis label inside and it rendered as unreadable
-    smears — visible only by actually looking at the page, which is why looking
-    is part of the job.
+    The SVG version stretched a ten-unit viewBox to the full container with
+    preserveAspectRatio="none", so one day's data became a slab across the page
+    and thirty days became distorted slivers. Bars in normal flow have a capped
+    width, so the count of bars is the only thing that changes.
     """
-    markup = bar_chart([{"day": "2026-09-01", "events": 10}])
-    svg = markup[markup.index("<svg") : markup.index("</svg>")]
-    assert "<text" not in svg
-    assert "chart-peak" in markup, "the peak label belongs in HTML beside the chart"
+    one = bar_chart([{"day": "2026-09-01", "events": 10}])
+    thirty = bar_chart([{"day": f"2026-09-{d:02d}", "events": 10} for d in range(1, 31)])
+
+    assert one.count('class="bar"') == 1
+    assert thirty.count('class="bar"') == 30
+    # Nothing in the markup scales with the number of points — no viewBox, no
+    # per-bar width. Width is a CSS cap that neither series can exceed.
+    assert "viewBox" not in one and "viewBox" not in thirty
+    assert "width=" not in one
+
+
+def test_bar_heights_are_proportional_to_the_peak():
+    markup = bar_chart(
+        [
+            {"day": "a", "events": 100},
+            {"day": "b", "events": 50},
+            {"day": "c", "events": 25},
+        ]
+    )
+    assert "height:100.00%" in markup
+    assert "height:50.00%" in markup
+    assert "height:25.00%" in markup
+
+
+def test_a_quiet_day_is_distinguishable_from_missing_data():
+    """A gap in the series must read as "nothing happened" rather than as data
+    that failed to load, so a zero day still draws a stub in a muted colour."""
+    markup = bar_chart([{"day": "a", "events": 40}, {"day": "b", "events": 0}])
+    assert 'class="fill empty"' in markup
+    assert markup.count('class="bar"') == 2
+
+
+def test_the_chart_scale_is_real_text_beside_the_plot():
+    """Not inside a scaled drawing. The previous version put labels in an SVG
+    that was stretched to fit, and they rendered as unreadable smears."""
+    markup = bar_chart([{"day": "a", "events": 80}])
+    assert "chart-scale" in markup
+    assert ">80<" in markup, "the peak is shown"
+    assert ">40<" in markup, "and the midpoint"
+    assert "<svg" not in markup
 
 
 def test_chart_of_nothing_is_nothing():
@@ -361,7 +398,7 @@ async def test_overview_renders_real_numbers_end_to_end(signed_in, api_client, o
         assert "Dashboard App" in response.text, "the app should be selectable"
         assert "$125.00" in response.text, "revenue must render from minor units"
         assert ">3<" in response.text.replace(" ", "").replace("\n", "") or "3" in response.text
-        assert "<svg" in response.text, "the chart should render server-side"
+        assert 'class="bar"' in response.text, "the chart should render server-side"
 
         events_page = await web.get(f"/events?app_id={app_id}")
         assert "install" in events_page.text

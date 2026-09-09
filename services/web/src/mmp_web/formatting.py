@@ -66,22 +66,25 @@ def bar_chart(
     value_key: str = "events",
     label_key: str = "day",
 ) -> str:
-    """A daily bar chart as an inline SVG, with its labels in HTML.
+    """A daily volume chart, laid out by CSS rather than drawn as SVG.
 
-    Server-rendered rather than drawn by a charting library, for the same reason
-    everything else here is inline: the page loads no third-party code, so the
-    Content-Security-Policy can forbid it entirely. It also means the chart is
-    in the HTML — reachable by a screen reader, and present in a saved page.
+    The previous version was an inline SVG stretched to its container with
+    ``preserveAspectRatio="none"``. That distorts everything: with a single
+    day's data the ten-unit viewBox was blown up to the full width of the page
+    and one bar became a slab; with thirty days the bars became slivers, and the
+    rounded corners and the baseline stroke were stretched with them. It also
+    forced the axis labels out of the drawing, because glyphs scaled too.
 
-    **No text inside the SVG.** The chart stretches to the width of its
-    container via ``preserveAspectRatio="none"``, which scales glyphs along with
-    the geometry — the first version put the axis label inside and rendered it as
-    unreadable smears. Geometry scales; type does not. So the axis labels are
-    ordinary HTML beside the drawing, where they stay the size they were meant to
-    be.
+    Bars in normal flow have none of those problems. A bar is a div whose height
+    is a percentage, so it is exact at any container width, the width is capped
+    so one day looks like one bar rather than a wall, and the labels are text
+    that was never scaled in the first place.
 
-    Every value is escaped on the way in. This builds markup by concatenation,
-    which is exactly where an unescaped campaign name becomes stored XSS.
+    Still no JavaScript and no charting library: the page loads no third-party
+    code, which is what lets its content-security policy forbid it outright.
+
+    Every value is escaped. This builds markup by concatenation, which is
+    exactly where an unescaped campaign name becomes stored XSS.
     """
     if not series:
         return ""
@@ -92,39 +95,40 @@ def bar_chart(
 
     values = [_value(point) for point in series]
     peak = max(values) if values else 0
-    # A flat all-zero series must render as a flat line, not divide by zero.
+    # A flat all-zero series renders as a flat line rather than dividing by zero.
     scale = peak or 1
 
-    # User units, not percentages: mixing the two inside a viewBox is how the
-    # first version ended up with an axis line that did not sit where it looked
-    # like it should.
-    column = 10.0
-    width = column * len(series)
-    height = 100.0
-    baseline = 96.0
-
     bars: list[str] = []
-    for index, (point, value) in enumerate(zip(series, values, strict=True)):
-        bar_height = (value / scale) * (baseline - 4)
+    for point, value in zip(series, values, strict=True):
         label = html.escape(str(point.get(label_key, "")))
+        # A day with no volume still gets a visible sliver, so the gap in the
+        # series reads as "nothing happened" rather than as missing data.
+        height = (value / scale) * 100 if value else 0
         bars.append(
-            f"<g><title>{label}: {value:,}</title>"
-            f'<rect x="{index * column + column * 0.15:.2f}" '
-            f'y="{baseline - bar_height:.2f}" '
-            f'width="{column * 0.7:.2f}" height="{max(bar_height, 0.5):.2f}" '
-            f'fill="#4f9cf9" rx="0.6"/></g>'
+            f'<div class="bar" title="{label}: {value:,}">'
+            f'<div class="fill{" empty" if not value else ""}" '
+            f'style="height:{height:.2f}%"></div>'
+            f"</div>"
         )
 
     first = html.escape(str(series[0].get(label_key, "")))
     last = html.escape(str(series[-1].get(label_key, "")))
+    midpoint = f"{peak // 2:,}" if peak else "0"
 
     return (
-        f'<div class="chart-peak">{peak:,}</div>'
-        f'<svg class="chart" viewBox="0 0 {width:.0f} {height:.0f}" '
-        f'preserveAspectRatio="none" role="img" '
-        f'aria-label="Daily volume, peak {peak:,}">'
-        f'<line x1="0" y1="{baseline}" x2="{width:.0f}" y2="{baseline}" '
-        f'stroke="#2a323b" stroke-width="0.5"/>'
-        f"{''.join(bars)}</svg>"
+        f'<div class="chart" role="img" aria-label="Daily volume, peak {peak:,}">'
+        # The scale sits beside the plot rather than inside it, so the numbers
+        # are real text at a real size.
+        f'<div class="chart-scale">'
+        f"<span>{peak:,}</span><span>{midpoint}</span><span>0</span>"
+        f"</div>"
+        f'<div class="chart-plot">'
+        # Two gridlines, at the peak and the midpoint. Any more is decoration
+        # competing with the data.
+        f'<div class="gridline" style="top:0"></div>'
+        f'<div class="gridline" style="top:50%"></div>'
+        f'<div class="bars">{"".join(bars)}</div>'
+        f"</div>"
+        f"</div>"
         f'<div class="chart-axis"><span>{first}</span><span>{last}</span></div>'
     )
