@@ -69,3 +69,22 @@ def test_documents_describing_unbuilt_systems_say_so_prominently() -> None:
     for name in ("08-billing.md", "13-ai.md"):
         header = (DOCS / "spec" / name).read_text()[:900]
         assert "NOT BUILT" in header, f"{name} must state up front that it is not built"
+
+
+def test_the_quickstart_uses_key_kinds_the_api_accepts() -> None:
+    """The quickstart originally told developers to send kind "client", which
+    the API rejects with a 422. Found by running the quickstart rather than by
+    reading it — a documented request that does not work is worse than an
+    undocumented one, because the reader trusts it.
+    """
+    import json
+    import re
+
+    schema = json.loads((DOCS / "api" / "openapi.json").read_text())
+    accepted = set(schema["components"]["schemas"]["ApiKeyCreate"]["properties"]["kind"]["enum"])
+    quickstart = (DOCS / "api" / "QUICKSTART.md").read_text()
+    documented = set(re.findall(r'"kind"\s*:\s*"(\w+)"', quickstart))
+
+    assert documented, "the quickstart should show how to create a key"
+    invalid = documented - accepted
+    assert not invalid, f"the quickstart documents key kinds the API rejects: {sorted(invalid)}"

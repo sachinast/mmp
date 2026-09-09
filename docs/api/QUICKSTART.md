@@ -11,16 +11,19 @@ curl -X POST https://api.example.com/v1/apps \
 
 curl -X POST https://api.example.com/v1/apps/$APP_ID/keys \
   -H "content-type: application/json" -H "x-csrf-token: $CSRF" -b cookies.txt \
-  -d '{"name":"production","kind":"client"}'
+  -d '{"name":"production","kind":"sdk","environment":"prod"}'
 ```
 
 **The raw key is returned once and never again.** Only an HMAC of it is stored.
 If you lose it, rotate — there is no reveal, because a key you can retrieve is a
 key an attacker can retrieve.
 
-A `client` key ships inside your app binary and is not a secret: it authorises
-writing events for one app and nothing else. A `server` key is a secret and is
-used with request signing.
+`kind` is `sdk` or `s2s`. An `sdk` key ships inside your app binary and is not
+a secret: it authorises writing events for one app and nothing else. An `s2s`
+key *is* a secret and is used with request signing below.
+
+The raw key comes back in `api_key`, alongside a `warning` telling you it will
+not be shown again.
 
 ## 2. Add the SDK
 
@@ -69,7 +72,7 @@ are refused: money as a float is how a revenue report stops reconciling.
 ## 4. Or integrate server to server
 
 For purchases you validate on your own backend, skip the SDK and sign the
-request. This is the path where a client key is not enough.
+request. This is the path an `s2s` key exists for.
 
 ```python
 import hashlib, hmac, json, time, requests
