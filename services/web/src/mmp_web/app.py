@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Form, Request, Response, status
@@ -46,7 +47,59 @@ NAV_ITEMS = [
     {"key": "links", "label": "Tracking links", "href": "/links"},
     {"key": "events", "label": "Events", "href": "/events"},
     {"key": "attribution", "label": "Attribution", "href": "/attribution"},
+    {"key": "fraud", "label": "Fraud", "href": "/fraud"},
+    {"key": "skan", "label": "SKAdNetwork", "href": "/skan"},
+    {"key": "deeplinks", "label": "Deep links", "href": "/deep-links"},
+    {"key": "integrations", "label": "Integrations", "href": "/integrations"},
+    {"key": "export", "label": "Export", "href": "/export"},
 ]
+
+# The datasets the export page offers, with a sentence each on what is in them.
+# Held here rather than fetched: the API has no endpoint that lists them, and
+# inventing one to populate a static list would be the wrong direction.
+EXPORT_DATASETS = [
+    {
+        "name": "events",
+        "title": "Events",
+        "description": "Every event as received, including your own properties.",
+    },
+    {
+        "name": "clicks",
+        "title": "Clicks",
+        "description": "Clicks through your tracking links, with campaign and sub-parameters.",
+    },
+    {
+        "name": "attributions",
+        "title": "Attributions",
+        "description": (
+            "One row per install, with the method, the winning click and the fraud verdict."
+        ),
+    },
+]
+
+# Severity is a number in the API — the same weights the fraud rules use — so
+# the mapping to a colour lives here rather than being reinvented per template.
+SEVERITY_CLASSES = {100: "sev-critical", 50: "sev-high", 25: "sev-medium", 10: "sev-low"}
+VERDICT_CLASSES = {
+    "fraudulent": "sev-critical",
+    "suspicious": "sev-high",
+    "clean": "active",
+}
+
+
+def severity_class(severity: int | None) -> str:
+    """A CSS class for a severity weight.
+
+    An unrecognised weight renders neutrally rather than falling through to
+    whatever class happened to be last — a new severity should look
+    unremarkable, not accidentally critical.
+    """
+    return SEVERITY_CLASSES.get(severity or 0, "sev-low")
+
+
+def verdict_class(verdict: str | None) -> str:
+    return VERDICT_CLASSES.get(verdict or "", "sev-low")
+
 
 METHOD_NOTES = {
     "referrer": "Play Install Referrer carried the click id — the strongest signal.",
@@ -157,6 +210,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if to_date < from_date:
             from_date, to_date = to_date, from_date
         return apps, selected, from_date, to_date
+
+    def _range_params(app_id: str, from_date: dt.date, to_date: dt.date) -> str:
+        """The reporting endpoints take timestamps and refuse an unbounded range.
+
+        `until` is the end of the chosen day: a from==to selection must mean
+        "that day", not an empty window.
+        """
+        return urlencode(
+            {
+                "app_id": app_id,
+                "since": f"{from_date.isoformat()}T00:00:00Z",
+                "until": f"{to_date.isoformat()}T23:59:59Z",
+            }
+        )
 
     def render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
         request = context.pop("request")
@@ -408,6 +475,262 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ApiError as exc:
             return await _error_page(request, api, "attribution", "attribution.html", exc)
 
+    @app.get("/export/{dataset}", include_in_schema=False)
+    async def download_export(request: Request, dataset: str) -> Response:
+        """Proxy the download rather than linking straight at the API.
+
+        A direct link is one hop shorter and works perfectly in development,
+        where both services answer on 127.0.0.1 and cookies ignore the port. It
+        breaks the moment they are deployed on different hostnames: the session
+        cookie is scoped to the dashboard's host, so the browser would not send
+        it to the API and every download would 401 — with nothing in the
+        dashboard's logs to explain why.
+
+        Streaming through here costs a hop and works in every deployment.
+        """
+        if dataset not in {item["name"] for item in EXPORT_DATASETS}:
+            return RedirectResponse("/export", status_code=status.HTTP_303_SEE_OTHER)
+
+        api = client_for(request)
+        query = urlencode(
+            {
+                key: value
+                for key, value in request.query_params.items()
+                if key in {"app_id", "since", "until"}
+            }
+        )
+        try:
+            async with api.stream("GET", f"/v1/exports/{dataset}?{query}") as upstream:
+                # Read fully before responding: a StreamingResponse would
+                # outlive this context manager and read from a closed client.
+                # The API caps an export at a million rows, so this is bounded —
+                # and if that cap ever rises, this is the line that has to
+                # change with it.
+                body = await upstream.aread()
+                return Response(
+                    content=body,
+                    media_type="text/csv",
+                    headers={
+                        "content-disposition": upstream.headers.get(
+                            "content-disposition", f'attachment; filename="{dataset}.csv"'
+                        ),
+                        "cache-control": "no-store",
+                    },
+                )
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError:
+            return RedirectResponse("/export", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ------------------------------------------------------------ fraud
+    @app.get("/fraud", response_class=HTMLResponse, include_in_schema=False)
+    async def fraud_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "fraud")
+            apps, app_id, from_date, to_date = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "findings": [],
+                "flagged": [],
+                "fraudulent": 0,
+                "suspicious": 0,
+                "severity_class": severity_class,
+                "verdict_class": verdict_class,
+                "error": None,
+            }
+            if app_id:
+                window = _range_params(app_id, from_date, to_date)
+                context["findings"] = await api.get(f"/v1/fraud/findings?{window}") or []
+                flagged = await api.get(f"/v1/fraud/installs?{window}") or []
+                context["flagged"] = flagged
+                # Counted here rather than asking the API for a summary it does
+                # not have. The list is capped at 500, so these are counts of
+                # what is shown, which is what the table beside them displays.
+                context["fraudulent"] = sum(
+                    1 for row in flagged if row.get("fraud_verdict") == "fraudulent"
+                )
+                context["suspicious"] = sum(
+                    1 for row in flagged if row.get("fraud_verdict") == "suspicious"
+                )
+            return render("fraud.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "fraud", "fraud.html", exc)
+
+    # ------------------------------------------------------- skadnetwork
+    @app.get("/skan", response_class=HTMLResponse, include_in_schema=False)
+    async def skan_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "skan")
+            apps, app_id, from_date, to_date = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "rows": [],
+                "caveat": "",
+                "total_winning": 0,
+                "total_non_winning": 0,
+                "total_suppressed": 0,
+                "total_redownloads": 0,
+                "conversion_values": [],
+                "error": None,
+            }
+            if app_id:
+                window = _range_params(app_id, from_date, to_date)
+                summary = await api.get(f"/v1/skan/summary?{window}") or {}
+                rows = summary.get("rows", [])
+                context |= {
+                    "rows": rows,
+                    # Carried from the API rather than written into the
+                    # template, so the warning cannot be lost in a redesign.
+                    "caveat": summary.get("caveat", ""),
+                    "total_winning": sum(r["winning_postbacks"] for r in rows),
+                    "total_non_winning": sum(r["non_winning_postbacks"] for r in rows),
+                    "total_suppressed": sum(r["suppressed"] for r in rows),
+                    "total_redownloads": sum(r["redownloads"] for r in rows),
+                    "conversion_values": (
+                        await api.get(f"/v1/skan/conversion-values?app_id={app_id}") or []
+                    ),
+                }
+            return render("skan.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "skan", "skan.html", exc)
+
+    # --------------------------------------------------------- deep links
+    @app.get("/deep-links", response_class=HTMLResponse, include_in_schema=False)
+    async def deep_links_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "deeplinks")
+            apps, app_id, _from, _to = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "deep_links": [],
+                "notice": request.query_params.get("notice"),
+                "error": None,
+            }
+            if app_id:
+                context["deep_links"] = await api.get(f"/v1/deep-links?app_id={app_id}") or []
+            return render("deeplinks.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "deeplinks", "deeplinks.html", exc)
+
+    @app.post("/deep-links", include_in_schema=False)
+    async def create_deep_link(
+        request: Request,
+        app_id: str = Form(...),
+        code: str = Form(...),
+        destination: str = Form(...),
+        fallback_url: str = Form(...),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        """Create, then redirect.
+
+        Post-redirect-get, so a refresh after creating does not offer to create
+        it again — which for a code that must be unique means a 409 the user did
+        not ask for.
+        """
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/deep-links", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            await api.post(
+                "/v1/deep-links",
+                json={
+                    "app_id": app_id,
+                    "code": code.strip(),
+                    "destination": destination.strip(),
+                    "fallback_url": fallback_url.strip(),
+                },
+            )
+            return _deep_link_redirect(app_id, f"Registered {code.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            # The API's own message — "code already exists for this app", or the
+            # reason a destination was refused — is more useful than anything
+            # this layer could invent.
+            return _deep_link_redirect(app_id, exc.detail)
+
+    @app.post("/deep-links/{deep_link_id}/delete", include_in_schema=False)
+    async def delete_deep_link(
+        request: Request,
+        deep_link_id: str,
+        app_id: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/deep-links", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            await api.delete(f"/v1/deep-links/{deep_link_id}")
+            return _deep_link_redirect(app_id, "Removed")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _deep_link_redirect(app_id, exc.detail)
+
+    def _deep_link_redirect(app_id: str, notice: str) -> RedirectResponse:
+        query = urlencode({"app_id": app_id, "notice": notice})
+        return RedirectResponse(f"/deep-links?{query}", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ------------------------------------------------------ integrations
+    @app.get("/integrations", response_class=HTMLResponse, include_in_schema=False)
+    async def integrations_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "integrations")
+            context |= {
+                "integrations": await api.get("/v1/integrations") or [],
+                "providers": await api.get("/v1/providers") or [],
+                "error": None,
+            }
+            return render("integrations.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "integrations", "integrations.html", exc)
+
+    # ----------------------------------------------------------- export
+    @app.get("/export", response_class=HTMLResponse, include_in_schema=False)
+    async def export_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "export")
+            apps, app_id, from_date, to_date = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "datasets": EXPORT_DATASETS,
+                "api_base": api_base,
+                # The export API takes timestamps, not dates. `until` is the end
+                # of the chosen day rather than its start, or a one-day
+                # selection would export nothing.
+                "since": f"{from_date.isoformat()}T00:00:00Z",
+                "until": f"{to_date.isoformat()}T23:59:59Z",
+                "error": None,
+            }
+            return render("export.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "export", "export.html", exc)
+
     async def _error_page(
         request: Request, api: ApiClient, active: str, template: str, exc: ApiError
     ) -> HTMLResponse:
@@ -459,6 +782,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "method_notes": METHOD_NOTES,
             "tracking_domain": tracking_domain,
             "cache_state": None,
+            # The new pages' collections. Present and empty rather than absent:
+            # an undefined name in Jinja renders as nothing and hides the fact
+            # that the panel failed, which is the opposite of what an error page
+            # is for.
+            "findings": [],
+            "flagged": [],
+            "fraudulent": 0,
+            "suspicious": 0,
+            "rows": [],
+            "caveat": "",
+            "total_winning": 0,
+            "total_non_winning": 0,
+            "total_suppressed": 0,
+            "total_redownloads": 0,
+            "conversion_values": [],
+            "deep_links": [],
+            "notice": None,
+            "integrations": [],
+            "providers": [],
+            "datasets": EXPORT_DATASETS,
+            "api_base": api_base,
+            "since": "",
+            "until": "",
+            "severity_class": severity_class,
+            "verdict_class": verdict_class,
         }
         return render(template, context, status_code=200)
 

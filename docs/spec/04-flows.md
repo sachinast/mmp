@@ -101,14 +101,19 @@ happened.
 
 ## Dashboard
 
-Built (`services/web`): overview, campaign performance, event breakdown,
-tracking link management.
+Ten pages: overview, apps, tracking links, events, attribution, fraud,
+SKAdNetwork, deep links, integrations, export.
 
-**Not built:** fraud findings, SKAdNetwork reporting, deep link registry,
-export, integration management. All are API-only.
+**Still API-only:** creating an integration. It takes credentials, and a form
+that handles secrets deserves designing rather than adding.
 
-Three bugs in the dashboard were found by *looking at the rendered page* rather
-than by any assertion — worth remembering as a testing gap, not just a UX one.
+Five bugs have now been found by *looking at the rendered page* rather than by
+any assertion. The most recent: export links pointed straight at the API, which
+works in development — both services answer on 127.0.0.1 and cookies ignore the
+port — and would have 401'd in production, where the session cookie is scoped to
+the dashboard's host. Downloads are proxied through the dashboard instead.
+
+That is five bugs no test caught, which is the argument for opening the page.
 
 ## UX principles applied
 

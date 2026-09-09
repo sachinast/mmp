@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Fraud · MMP{% endblock %}
+{% block content %}
+<h1>Fraud signals</h1>
+<p class="sub">
+  Rule-based, with stated thresholds. Nothing here changes an attribution —
+  flagged installs are still attributed and still counted everywhere else.
+</p>
+
+{% include "partials/controls.html" %}
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% else %}
+  <div class="grid cols-4">
+    <div class="card stat">
+      <div class="label">Findings</div>
+      <div class="value">{{ findings | length }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Flagged installs</div>
+      <div class="value">{{ flagged | length }}</div>
+    </div>
+    {# Zero renders as zero. An em dash means "undefined" everywhere else on
+       this dashboard, and "no installs were flagged" is a real answer rather
+       than a missing one — showing them differently in the same row invites
+       exactly the wrong reading. #}
+    <div class="card stat">
+      <div class="label">Fraudulent</div>
+      <div class="value">{{ fraudulent }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Suspicious</div>
+      <div class="value">{{ suspicious }}</div>
+    </div>
+  </div>
+
+  <h2>Traffic findings</h2>
+  <p class="sub">
+    One row per link, per rule, per window. Written by an hourly sweep and
+    cleared when a link stops misbehaving — a finding left standing after the
+    behaviour stopped is worse than no finding.
+  </p>
+  {% if not findings %}
+    <div class="card">
+      {% with title = "No findings in this range",
+              hint = "Traffic-level rules — flooding, click farms, device replay — found nothing to report." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rule</th><th>Link</th><th>Campaign</th>
+            <th>What was found</th><th>Window</th><th class="num">Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for finding in findings %}
+            <tr>
+              <td><span class="pill {{ severity_class(finding.severity) }}">{{ finding.rule }}</span></td>
+              <td>{% if finding.tracking_code %}<code>{{ finding.tracking_code }}</code>{% else %}<span class="pill">app-wide</span>{% endif %}</td>
+              <td>{{ finding.campaign_name or '—' }}</td>
+              {# The sentence stored with the finding, not one regenerated now:
+                 the thresholds it quotes may since have changed, and a finding
+                 has to say what it said when it was made. #}
+              <td>{{ finding.detail }}</td>
+              <td class="meta">{{ finding.window_start[:10] }} → {{ finding.window_end[:10] }}</td>
+              <td class="num">{{ finding.severity }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <h2>Flagged installs</h2>
+  <p class="sub">
+    Individual attributions the per-install rules scored. This view filters to
+    flagged rows; every reporting page still counts them.
+  </p>
+  {% if not flagged %}
+    <div class="card">
+      {% with title = "No flagged installs in this range",
+              hint = "Click-to-install gaps, bot clicks and late conversions all looked ordinary." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Installed</th><th>Method</th><th>Verdict</th>
+            <th>Rules that fired</th><th class="num">Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for install in flagged %}
+            <tr>
+              <td class="meta">{{ install.installed_at[:19] | replace('T', ' ') }}</td>
+              <td><span class="pill {{ install.method }}">{{ install.method }}</span></td>
+              <td><span class="pill {{ verdict_class(install.fraud_verdict) }}">{{ install.fraud_verdict }}</span></td>
+              <td>{% for rule in install.rules %}<span class="pill">{{ rule }}</span> {% endfor %}</td>
+              <td class="num">{{ install.fraud_score }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <p class="meta">
+    Thresholds are reasoned, not measured against labelled traffic. False
+    positives are the expensive error here, so they are set where a legitimate
+    explanation is hard to construct rather than where a signal first appears.
+  </p>
+{% endif %}
+{% endblock %}

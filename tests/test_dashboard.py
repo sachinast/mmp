@@ -124,6 +124,11 @@ async def test_next_is_honoured_after_login(web, api_client):
         ("/links", "Tracking links"),
         ("/events", "Events"),
         ("/attribution", "Attribution"),
+        ("/fraud", "Fraud signals"),
+        ("/skan", "SKAdNetwork"),
+        ("/deep-links", "Deep links"),
+        ("/integrations", "Integrations"),
+        ("/export", "Export"),
     ],
 )
 async def test_every_page_renders(signed_in, path, heading):
@@ -366,3 +371,213 @@ async def test_overview_renders_real_numbers_end_to_end(signed_in, api_client, o
         await owner_conn.execute("DELETE FROM rollup_events_hourly WHERE app_id = $1", app_id)
         await owner_conn.execute("DELETE FROM campaigns WHERE id = $1", campaign_id)
         await owner_conn.execute("DELETE FROM apps WHERE id = $1", app_id)
+
+
+# --- the operational pages ----------------------------------------------
+async def _with_an_app(signed_in, api_client, name="Dash App", package="com.example.dash"):
+    """Sign in through the API too, and create an app.
+
+    Several pages take an empty branch when the account has no apps — which is
+    correct behaviour and useless for testing what they render when it does.
+    """
+    await api_client.post(
+        "/v1/auth/login",
+        json={"email": signed_in["email"], "password": signed_in["password"]},
+    )
+    created = await api_client.post(
+        "/v1/apps",
+        json={"name": name, "platform": "ios", "ios_bundle_id": package},
+        headers={"x-csrf-token": api_client.cookies["mmp_csrf"]},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
+async def test_fraud_page_states_that_flagged_installs_are_still_counted(signed_in):
+    """The most important sentence on the page. A fraud verdict never silently
+    moves anyone's numbers, and a reader who assumes otherwise will
+    double-subtract when reconciling against the overview."""
+    response = await signed_in["client"].get("/fraud")
+    assert response.status_code == 200
+    assert "still counted" in response.text
+
+
+async def test_skan_page_carries_the_api_s_own_caveat(signed_in, api_client, monkeypatch):
+    """The warning that SKAdNetwork numbers do not reconcile comes from the API
+    response, not from the template — so it survives a redesign of this page."""
+    from mmp_web import app as web_app
+
+    original = web_app.ApiClient.get
+
+    async def fake_get(self, path, **kwargs):
+        if path.startswith("/v1/skan/summary"):
+            return {"rows": [], "caveat": "CAVEAT-FROM-THE-API"}
+        return await original(self, path, **kwargs)
+
+    await _with_an_app(signed_in, api_client, "Caveat", "com.example.caveat")
+    monkeypatch.setattr(web_app.ApiClient, "get", fake_get)
+    response = await signed_in["client"].get("/skan")
+    assert "CAVEAT-FROM-THE-API" in response.text
+
+
+async def test_skan_page_says_when_apple_withheld_a_campaign(signed_in, api_client, monkeypatch):
+    """An empty cell reads as zero. Apple nulls the campaign identifier below
+    its privacy thresholds, and the page has to say so."""
+    from mmp_web import app as web_app
+
+    original = web_app.ApiClient.get
+
+    async def fake_get(self, path, **kwargs):
+        if path.startswith("/v1/skan/summary"):
+            return {
+                "rows": [
+                    {
+                        "ad_network_id": "example.skadnetwork",
+                        "source_identifier": None,
+                        "winning_postbacks": 4,
+                        "non_winning_postbacks": 1,
+                        "redownloads": 0,
+                        "average_conversion_value": None,
+                        "suppressed": 4,
+                    }
+                ],
+                "caveat": "x",
+            }
+        return await original(self, path, **kwargs)
+
+    await _with_an_app(signed_in, api_client, "Withheld", "com.example.withheld")
+    monkeypatch.setattr(web_app.ApiClient, "get", fake_get)
+    response = await signed_in["client"].get("/skan")
+    assert "withheld by Apple" in response.text
+
+
+async def test_export_page_names_what_is_not_in_the_file(signed_in, api_client):
+    """Device and IP hashes are excluded deliberately. Someone reconciling an
+    export against their own warehouse needs to know that before they conclude
+    the data is wrong."""
+    await _with_an_app(signed_in, api_client, "Export", "com.example.exportpage")
+    response = await signed_in["client"].get("/export")
+    assert "device and ip hashes" in response.text.lower()
+
+
+async def test_integrations_page_never_renders_a_credential_value(signed_in, monkeypatch):
+    """Only the names of supplied fields are returned by the API. If a value
+    ever appears here, something upstream started leaking it."""
+    from mmp_web import app as web_app
+
+    original = web_app.ApiClient.get
+
+    async def fake_get(self, path, **kwargs):
+        if path == "/v1/integrations":
+            return [
+                {
+                    "id": "1",
+                    "name": "Network",
+                    "provider": "s2s_json",
+                    "credential_names": ["api_token"],
+                    "status": "active",
+                    "created_at": "2026-09-01T00:00:00Z",
+                    "secret_value": "sk_live_should_never_render",
+                }
+            ]
+        if path == "/v1/providers":
+            return []
+        return await original(self, path, **kwargs)
+
+    monkeypatch.setattr(web_app.ApiClient, "get", fake_get)
+    response = await signed_in["client"].get("/integrations")
+    assert "api_token" in response.text, "the field name is shown"
+    assert "sk_live_should_never_render" not in response.text
+
+
+async def test_creating_a_deep_link_without_a_csrf_token_does_nothing(signed_in):
+    """The dashboard's mutations go through the same CSRF check as the API's."""
+    response = await signed_in["client"].post(
+        "/deep-links",
+        data={
+            "app_id": "whatever",
+            "code": "x",
+            "destination": "/x",
+            "fallback_url": "https://example.com",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/deep-links"
+
+
+async def test_a_deep_link_failure_shows_the_api_s_reason(signed_in, monkeypatch):
+    """ "Something went wrong" is useless. The API knows the code was taken, or
+    the destination was multi-line, and that is what the user needs."""
+    from mmp_web import app as web_app
+
+    async def failing_post(self, path, **kwargs):
+        raise web_app.ApiError(409, "code 'summer' already exists for this app")
+
+    monkeypatch.setattr(web_app.ApiClient, "post", failing_post)
+    client = signed_in["client"]
+    csrf = client.cookies.get("mmp_csrf")
+    response = await client.post(
+        "/deep-links",
+        data={
+            "app_id": "app-1",
+            "code": "summer",
+            "destination": "/summer",
+            "fallback_url": "https://example.com",
+            "csrf_token": csrf,
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "already+exists" in response.headers["location"].replace("%20", "+")
+
+
+async def test_the_export_download_goes_through_the_dashboard(signed_in, api_client):
+    """Not straight at the API.
+
+    A direct link works in development, where both services answer on 127.0.0.1
+    and cookies ignore the port, and 401s in production, where the session
+    cookie is scoped to the dashboard's host and the API is on another. Nothing
+    in the dashboard's logs would explain that.
+    """
+    app = await _with_an_app(signed_in, api_client, "Dl", "com.example.dl")
+    response = await signed_in["client"].get(f"/export?app_id={app['id']}")
+    assert 'href="/export/events?' in response.text
+    assert "/v1/exports/" not in response.text, "the API must not be linked directly"
+
+
+async def test_downloading_an_export_returns_csv(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Csv", "com.example.csv")
+    response = await signed_in["client"].get(
+        f"/export/events?app_id={app['id']}&since=2026-09-01T00:00:00Z&until=2026-09-08T00:00:00Z"
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    # The header row proves it came from the API rather than being invented here.
+    assert "event_name" in response.text
+
+
+async def test_an_unknown_dataset_never_reaches_the_api(signed_in, monkeypatch):
+    """The dataset name is interpolated into a URL path, so it is checked
+    against the list this page offers rather than forwarded.
+
+    Asserting the redirect alone would prove nothing: without the guard the API
+    answers 404 and this handler redirects identically. What distinguishes them
+    is whether the request was made at all.
+    """
+    from mmp_web import app as web_app
+
+    called: list[str] = []
+    original = web_app.ApiClient.stream
+
+    def recording_stream(self, method, path, **kwargs):
+        called.append(path)
+        return original(self, method, path, **kwargs)
+
+    monkeypatch.setattr(web_app.ApiClient, "stream", recording_stream)
+
+    response = await signed_in["client"].get("/export/passwords?app_id=x", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/export"
+    assert called == [], f"the unknown dataset was forwarded upstream: {called}"

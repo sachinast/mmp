@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}SKAdNetwork · MMP{% endblock %}
+{% block content %}
+<h1>SKAdNetwork</h1>
+<p class="sub">
+  Apple's iOS attribution. A different measurement model, not a degraded version
+  of the deterministic one — read the caveat below before comparing anything.
+</p>
+
+{% include "partials/controls.html" %}
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% else %}
+  {# The caveat travels with the data from the API rather than living only
+     here, so it survives a rewrite of this template. #}
+  <div class="error" style="border-left-color: var(--warn)">
+    <strong style="color: var(--warn)">These numbers do not reconcile with installs</strong>
+    <div class="meta" style="margin-top:6px">{{ caveat }}</div>
+  </div>
+
+  <div class="grid cols-4">
+    <div class="card stat">
+      <div class="label">Winning postbacks</div>
+      <div class="value">{{ total_winning }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Non-winning</div>
+      <div class="value">{{ total_non_winning }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Values withheld</div>
+      <div class="value">{{ total_suppressed }}</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Redownloads</div>
+      <div class="value">{{ total_redownloads }}</div>
+    </div>
+  </div>
+
+  <h2>By network and campaign</h2>
+  {% if not rows %}
+    <div class="card">
+      {% with title = "No postbacks in this range",
+              hint = "Apple sends these days after an install, and only for apps with a registered App Store id." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Ad network</th><th>Campaign</th>
+            <th class="num">Won</th><th class="num">Lost</th>
+            <th class="num">Avg value</th><th class="num">Withheld</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td><code>{{ row.ad_network_id }}</code></td>
+              {# Apple nulls this below its privacy thresholds. Saying so beats
+                 rendering an empty cell that reads as zero. #}
+              <td>{{ row.source_identifier or 'withheld by Apple' }}</td>
+              <td class="num">{{ row.winning_postbacks }}</td>
+              <td class="num">{{ row.non_winning_postbacks }}</td>
+              <td class="num">
+                {% if row.average_conversion_value is not none %}
+                  {{ '%.1f' | format(row.average_conversion_value) }}
+                {% else %}—{% endif %}
+              </td>
+              <td class="num">{{ row.suppressed }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="meta">
+      An average conversion value is computed only from the postbacks that
+      carried one. Where <em>withheld</em> is high, the average describes a small
+      and possibly unrepresentative share of the traffic.
+    </p>
+  {% endif %}
+
+  <h2>Conversion values</h2>
+  <p class="sub">
+    Six bits — 0 to 63 — is everything you learn about what a user did after
+    installing. What the values mean is yours to decide.
+  </p>
+  {% if not conversion_values %}
+    <div class="card">
+      {% with title = "No conversion values configured",
+              hint = "Without a mapping the SDK reports nothing after the install itself." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Event</th><th class="num">Value</th><th>Coarse</th><th>Platform</th></tr>
+        </thead>
+        <tbody>
+          {% for mapping in conversion_values %}
+            <tr>
+              <td><code>{{ mapping.event_name }}</code></td>
+              <td class="num">{{ mapping.conversion_value }}</td>
+              <td>{{ mapping.coarse_value or '—' }}</td>
+              <td class="meta">{{ mapping.platform }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="meta">
+      Apple ignores a decrease rather than reporting one, and every accepted
+      update restarts the measurement window — so the SDK only reports a value
+      that actually rises.
+    </p>
+  {% endif %}
+{% endif %}
+{% endblock %}

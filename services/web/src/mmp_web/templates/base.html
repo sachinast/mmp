@@ -66,6 +66,13 @@
     .pill.click_id { color: var(--accent); border-color: var(--accent); }
     .pill.device_match { color: var(--warn); border-color: var(--warn); }
     .pill.organic { color: var(--muted); }
+    /* Severity and verdict have their own classes rather than borrowing the
+       attribution-method ones. Reusing `device_match` to mean "critical" reads
+       fine until someone changes what a method looks like. */
+    .pill.sev-critical { color: var(--bad); border-color: var(--bad); }
+    .pill.sev-high { color: var(--warn); border-color: var(--warn); }
+    .pill.sev-medium { color: var(--warn); border-color: var(--border); }
+    .pill.sev-low { color: var(--muted); }
     .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--text); margin-bottom: 6px; }
     .error { border-left: 3px solid var(--bad); background: var(--surface);

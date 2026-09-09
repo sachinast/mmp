@@ -17,7 +17,7 @@ gated before the next began.
 | API keys | Complete | `routes/keys.py` |
 | Sessions & rollups | Complete | `mmp_worker/rollups.py` |
 | Analytics API | Complete | `routes/analytics.py` |
-| Dashboard | **Partial** | `services/web` |
+| Dashboard | Complete | `services/web` |
 | S2S events | Complete | `tracker/s2s.py` |
 | Postbacks | Complete | `mmp_worker/postbacks.py` |
 | Webhooks | Complete | `mmp_worker/webhook_sender.py` |
@@ -60,8 +60,10 @@ From [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md):
 
 ## Not done, and merely incomplete
 
-- **Dashboard.** Serves the core reporting views. Fraud findings, SKAdNetwork
-  reporting, deep link management and export are API-only.
+- **Dashboard.** Covers every reporting and configuration view including fraud,
+  SKAdNetwork, deep links, integrations and export. Integration *creation* is
+  still API-only — it takes credentials, and a form that handles secrets is
+  worth designing rather than adding.
 - **Android native module uncompiled.** Build config committed; needs a JDK
   17–21 and disk space. See [DEVICE_TESTING.md](../DEVICE_TESTING.md).
 - **No device testing.** No postback from a real handset, no RN app built end to

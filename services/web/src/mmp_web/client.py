@@ -12,6 +12,8 @@ template bug becomes a tenancy bug.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,6 +100,33 @@ class ApiClient:
     async def post(self, path: str, **kwargs: Any) -> Any:
         data, _headers = await self.request("POST", path, **kwargs)
         return data
+
+    @asynccontextmanager
+    async def stream(self, method: str, path: str, **kwargs: Any) -> AsyncIterator[httpx.Response]:
+        """Stream a response through, rather than buffering it.
+
+        Used for exports, which can be a million rows. Reading one into memory
+        to hand it on would make a single download decide how much RAM the
+        dashboard needs — the same reason the API streams it in the first place.
+
+        The timeout is deliberately not the dashboard's usual one: a page that
+        hangs for ten seconds is a bad page, but an export legitimately takes
+        longer than any page should.
+        """
+        async with (
+            httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=httpx.Timeout(300.0, connect=5.0),
+                cookies=self._cookies(),
+            ) as client,
+            client.stream(method, path, headers=self._headers(), **kwargs) as response,
+        ):
+            if response.status_code == 401:
+                raise Unauthorized(401, "not authenticated")
+            if response.status_code >= 400:
+                await response.aread()
+                raise ApiError(response.status_code, "export failed")
+            yield response
 
     async def delete(self, path: str, **kwargs: Any) -> Any:
         data, _headers = await self.request("DELETE", path, **kwargs)

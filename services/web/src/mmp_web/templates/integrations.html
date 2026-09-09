@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Integrations · MMP{% endblock %}
+{% block content %}
+<h1>Integrations</h1>
+<p class="sub">
+  The networks you send conversions to. Credentials are encrypted at rest and
+  never returned — only the names of the fields you supplied.
+</p>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% else %}
+  <h2>Configured</h2>
+  {% if not integrations %}
+    <div class="card">
+      {% with title = "No integrations configured",
+              hint = "An integration tells a postback rule how to talk to a network: which adapter, what credentials, what settings." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Adapter</th><th>Credentials</th><th>Status</th><th>Added</th></tr>
+        </thead>
+        <tbody>
+          {% for integration in integrations %}
+            <tr>
+              <td>{{ integration.name }}</td>
+              <td><code>{{ integration.provider }}</code></td>
+              {# Names only, never values. A credential you can read back from a
+                 dashboard is one an attacker can read back too. #}
+              <td>
+                {% for name in integration.credential_names %}<span class="pill">{{ name }}</span> {% endfor %}
+                {% if not integration.credential_names %}<span class="meta">stored, not shown</span>{% endif %}
+              </td>
+              <td><span class="pill {{ integration.status }}">{{ integration.status }}</span></td>
+              <td class="meta">{{ integration.created_at[:10] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <h2>Available adapters</h2>
+  <p class="sub">
+    What each adapter can carry. A rule that needs a capability its adapter does
+    not have is refused when you save it, not discovered as a delivery that
+    never arrives.
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Adapter</th><th>Auth</th><th>Capabilities</th><th>Event names it sends</th></tr>
+      </thead>
+      <tbody>
+        {% for provider in providers %}
+          <tr>
+            <td><code>{{ provider.name }}</code><div class="meta">{{ provider.display_name }}</div></td>
+            <td class="meta">{{ provider.auth_style }}</td>
+            <td>{% for capability in provider.capabilities %}<span class="pill">{{ capability }}</span> {% endfor %}</td>
+            <td>
+              {% if provider.event_map %}
+                {% for ours, theirs in provider.event_map.items() %}
+                  <div class="meta"><code>{{ ours }}</code> → <code>{{ theirs }}</code></div>
+                {% endfor %}
+              {% else %}
+                <span class="meta">sent unchanged</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

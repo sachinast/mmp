@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Deep links · MMP{% endblock %}
+{% block content %}
+<h1>Deep links</h1>
+<p class="sub">
+  Destinations you pre-approve, named by a code a tracking link can reference.
+  A registered code can carry any destination your app understands, because it
+  came from you rather than from a URL someone tapped.
+</p>
+
+<form class="inline card" method="get" style="margin-bottom:18px">
+  <div>
+    <label for="app_id">App</label>
+    <select id="app_id" name="app_id">
+      {% for app in apps %}
+        <option value="{{ app.id }}" {% if app.id == selected_app_id %}selected{% endif %}>{{ app.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit">Show</button>
+</form>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% endif %}
+{% if notice %}
+  <div class="error" style="border-left-color: var(--good)">
+    <strong style="color: var(--good)">{{ notice }}</strong>
+  </div>
+{% endif %}
+
+{% if selected_app_id %}
+  <div class="card" style="margin-bottom:18px">
+    <h2 style="margin-top:0">Register a destination</h2>
+    <form class="inline" method="post" action="/deep-links">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+      <div>
+        <label for="code">Code</label>
+        <input id="code" name="code" required maxlength="32" placeholder="summer">
+      </div>
+      <div>
+        <label for="destination">Destination</label>
+        <input id="destination" name="destination" required size="30" placeholder="/campaigns/summer">
+      </div>
+      <div>
+        <label for="fallback_url">Web fallback</label>
+        <input id="fallback_url" name="fallback_url" required size="30"
+               placeholder="https://example.com/summer">
+      </div>
+      <button type="submit">Register</button>
+    </form>
+    <p class="meta">
+      The fallback is where someone lands if they tap the link and do not
+      install. Use a code rather than a raw path in a link whenever the
+      destination matters — an unregistered code is never honoured.
+    </p>
+  </div>
+{% endif %}
+
+{% if not deep_links %}
+  <div class="card">
+    {% with title = "No deep links registered",
+            hint = "Links can still carry a relative path with ?dl=/product/123 — it is validated against an allowlist." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Code</th><th>Destination</th><th>Web fallback</th><th>Use in a link</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for link in deep_links %}
+          <tr>
+            <td><code>{{ link.code }}</code></td>
+            <td><code>{{ link.destination }}</code></td>
+            <td class="meta">{{ link.fallback_url }}</td>
+            <td><code>?dl_code={{ link.code }}</code></td>
+            <td>
+              <form method="post" action="/deep-links/{{ link.id }}/delete" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+                <button class="secondary" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

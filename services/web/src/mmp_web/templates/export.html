@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Export · MMP{% endblock %}
+{% block content %}
+<h1>Export</h1>
+<p class="sub">Your own rows, as CSV, streamed straight from the API.</p>
+
+<form class="inline card" method="get" style="margin-bottom:18px">
+  <div>
+    <label for="app_id">App</label>
+    <select id="app_id" name="app_id">
+      {% for app in apps %}
+        <option value="{{ app.id }}" {% if app.id == selected_app_id %}selected{% endif %}>{{ app.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="from">From</label>
+    <input id="from" name="from" type="date" value="{{ from_date }}">
+  </div>
+  <div>
+    <label for="to">To</label>
+    <input id="to" name="to" type="date" value="{{ to_date }}">
+  </div>
+  <button type="submit">Apply</button>
+</form>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not selected_app_id %}
+  <div class="card">
+    {% with title = "No apps yet", hint = "Create an app before exporting anything." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="grid cols-2">
+    {% for dataset in datasets %}
+      <div class="card">
+        <h2 style="margin-top:0">{{ dataset.title }}</h2>
+        <p class="meta" style="margin-bottom:12px">{{ dataset.description }}</p>
+        {# Through the dashboard, not straight at the API. A direct link works
+           in development — both services answer on 127.0.0.1 and cookies
+           ignore the port — and 401s in production, where the session cookie
+           is scoped to this host and the API is on another. #}
+        <a href="/export/{{ dataset.name }}?app_id={{ selected_app_id }}&since={{ since }}&until={{ until }}">
+          Download {{ dataset.name }}.csv
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+
+  <p class="meta" style="margin-top:20px">
+    Exports require the admin role — taking the dataset out of the platform is a
+    different act from reading a report. Every export is recorded in the audit
+    log before a row is sent.
+  </p>
+  <p class="meta">
+    <strong>What is deliberately not in the file:</strong> device and IP hashes.
+    They are ours rather than yours — derived from an advertising ID and an
+    address under a system-wide pepper, which makes them stable pseudonyms for a
+    person. Your own <code>anonymous_id</code> and <code>user_id</code> are
+    included.
+  </p>
+  <p class="meta">
+    Once downloaded, a file is outside the reach of any later deletion request.
+    Ranges are capped at 31 days and one million rows, and both are refusals
+    rather than truncations — a silently short CSV is worse than one that fails.
+  </p>
+{% endif %}
+{% endblock %}
