@@ -6,13 +6,109 @@
 
 {% if error %}
   {% include "partials/error.html" %}
-{% elif not links %}
+{% endif %}
+{% if notice %}
+  <div class="error" style="border-left-color: var(--good)">
+    <strong style="color: var(--good)">{{ notice }}</strong>
+  </div>
+{% endif %}
+
+{% if not apps %}
   <div class="card">
-    {% with title = "No tracking links yet",
-            hint = "Create a campaign, then a link, and hand its URL to your ad network." %}
+    {% with title = "Add an app first",
+            hint = "A tracking link belongs to a campaign, and a campaign belongs to an app." %}
       {% include "partials/empty.html" %}
     {% endwith %}
   </div>
+{% else %}
+  <div class="grid cols-2" style="margin-bottom:18px">
+    <div class="card">
+      <h2 style="margin-top:0">Add a campaign</h2>
+      <form method="post" action="/campaigns">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="inline">
+          <div>
+            <label for="campaign_app">App</label>
+            <select id="campaign_app" name="app_id">
+              {% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="campaign_name">Name</label>
+            <input id="campaign_name" name="name" required placeholder="Summer Sale">
+          </div>
+          <div>
+            <label for="source">Source</label>
+            <input id="source" name="source" size="12" placeholder="network_a">
+          </div>
+          <div>
+            <label for="medium">Medium</label>
+            <input id="medium" name="medium" size="8" placeholder="cpi">
+          </div>
+          <button type="submit">Create</button>
+        </div>
+      </form>
+      <p class="meta">
+        Source and medium are how this campaign appears in reports. They are
+        yours to choose; nothing here interprets them.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Add a tracking link</h2>
+      {% if not campaigns %}
+        <p class="meta">Create a campaign first — a link belongs to one.</p>
+      {% else %}
+        <form method="post" action="/links">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="inline">
+            <div>
+              <label for="campaign_id">Campaign</label>
+              <select id="campaign_id" name="campaign_id">
+                {% for campaign in campaigns %}
+                  <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label for="link_name">Name</label>
+              <input id="link_name" name="name" required size="14" placeholder="summer-android">
+            </div>
+            <div>
+              <label for="fallback_url">Fallback URL</label>
+              <input id="fallback_url" name="fallback_url" required size="24"
+                     placeholder="https://acme.example">
+            </div>
+            <div>
+              <label for="android_url">Android store URL</label>
+              <input id="android_url" name="android_url" size="24"
+                     placeholder="https://play.google.com/...">
+            </div>
+            <div>
+              <label for="ios_url">iOS store URL</label>
+              <input id="ios_url" name="ios_url" size="24" placeholder="https://apps.apple.com/...">
+            </div>
+            <button type="submit">Create</button>
+          </div>
+        </form>
+        <p class="meta">
+          The fallback is where someone lands on a platform you have no store URL
+          for — a desktop browser, most often. It is the one field that is required.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
+{% if not links %}
+  {% if apps %}
+    <div class="card">
+      {% with title = "No tracking links yet",
+              hint = "Create one above, then hand its URL to your ad network." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% endif %}
 {% else %}
   <div class="table-wrap">
     <table>

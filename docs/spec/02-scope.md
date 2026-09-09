@@ -60,10 +60,10 @@ From [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md):
 
 ## Not done, and merely incomplete
 
-- **Dashboard.** Covers every reporting and configuration view including fraud,
-  SKAdNetwork, deep links, integrations and export. Integration *creation* is
-  still API-only — it takes credentials, and a form that handles secrets is
-  worth designing rather than adding.
+- **Dashboard.** Covers every reporting and configuration view, and onboarding:
+  apps, campaigns, tracking links and API keys are all created from the UI.
+  Integration *creation* is still API-only — it takes a network's credentials,
+  and a form that handles secrets is worth designing rather than adding.
 - **Android native module uncompiled.** Build config committed; needs a JDK
   17–21 and disk space. See [DEVICE_TESTING.md](../DEVICE_TESTING.md).
 - **No device testing.** No postback from a real handset, no RN app built end to

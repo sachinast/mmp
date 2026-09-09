@@ -381,12 +381,161 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         api = client_for(request)
         try:
             context = await page_context(request, api, "apps")
-            context |= {"apps": await api.get("/v1/apps") or [], "error": None}
+            context |= {
+                "apps": await api.get("/v1/apps") or [],
+                "notice": request.query_params.get("notice"),
+                "new_key": None,
+                "error": None,
+            }
             return render("apps.html", context)
         except Unauthorized:
             return login_redirect(request)
         except ApiError as exc:
             return await _error_page(request, api, "apps", "apps.html", exc)
+
+    @app.post("/apps", include_in_schema=False)
+    async def create_app_action(
+        request: Request,
+        name: str = Form(...),
+        platform: str = Form(...),
+        identifier: str = Form(""),
+        install_window_days: int = Form(7),
+        event_window_days: int = Form(30),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/apps", status_code=status.HTTP_303_SEE_OTHER)
+
+        body: dict[str, Any] = {
+            "name": name.strip(),
+            "platform": platform,
+            "install_window_days": install_window_days,
+            "event_window_days": event_window_days,
+        }
+        # One field in the form, two in the API. Which one it is follows from
+        # the platform, and asking someone to know that is asking them to know
+        # our schema.
+        identifier = identifier.strip()
+        if identifier:
+            if platform == "ios":
+                body["ios_bundle_id"] = identifier
+            else:
+                body["android_package_name"] = identifier
+
+        try:
+            await api.post("/v1/apps", json=body)
+            return _notice("/apps", f"Created {name.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice("/apps", exc.detail)
+
+    @app.post("/apps/{app_id}/keys", include_in_schema=False)
+    async def create_key_action(
+        request: Request,
+        app_id: str,
+        name: str = Form("default"),
+        environment: str = Form("prod"),
+        kind: str = Form("sdk"),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        """Renders the result instead of redirecting.
+
+        The raw key is returned once and never again, so it must reach the page
+        in a response body rather than a URL — a redirect would put a live
+        credential into the address bar, the browser's history, and every
+        access log between here and the user.
+        """
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/apps", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            created = await api.post(
+                f"/v1/apps/{app_id}/keys",
+                json={"name": name.strip() or "default", "environment": environment, "kind": kind},
+            )
+            context = await page_context(request, api, "apps")
+            context |= {
+                "apps": await api.get("/v1/apps") or [],
+                "new_key": created,
+                "notice": None,
+                "error": None,
+            }
+            return render("apps.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice("/apps", exc.detail)
+
+    @app.post("/campaigns", include_in_schema=False)
+    async def create_campaign_action(
+        request: Request,
+        app_id: str = Form(...),
+        name: str = Form(...),
+        source: str = Form(""),
+        medium: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/links", status_code=status.HTTP_303_SEE_OTHER)
+        body: dict[str, Any] = {"app_id": app_id, "name": name.strip()}
+        if source.strip():
+            body["source"] = source.strip()
+        if medium.strip():
+            body["medium"] = medium.strip()
+        try:
+            await api.post("/v1/campaigns", json=body)
+            return _notice("/links", f"Created campaign {name.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice("/links", exc.detail)
+
+    @app.post("/links", include_in_schema=False)
+    async def create_link_action(
+        request: Request,
+        campaign_id: str = Form(...),
+        name: str = Form(...),
+        fallback_url: str = Form(...),
+        android_url: str = Form(""),
+        ios_url: str = Form(""),
+        deep_link_path: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/links", status_code=status.HTTP_303_SEE_OTHER)
+        body: dict[str, Any] = {
+            "campaign_id": campaign_id,
+            "name": name.strip(),
+            "fallback_url": fallback_url.strip(),
+        }
+        for field, value in (
+            ("android_url", android_url),
+            ("ios_url", ios_url),
+            ("deep_link_path", deep_link_path),
+        ):
+            if value.strip():
+                body[field] = value.strip()
+        try:
+            await api.post("/v1/tracking-links", json=body)
+            return _notice("/links", f"Created {name.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice("/links", exc.detail)
+
+    def _notice(path: str, message: str) -> RedirectResponse:
+        """Post-redirect-get, so a refresh does not offer to create it again.
+
+        Only ever used for messages. A secret goes in a response body, never in
+        a URL — see the key handler above.
+        """
+        return RedirectResponse(
+            f"{path}?{urlencode({'notice': message})}", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     @app.get("/links", response_class=HTMLResponse, include_in_schema=False)
     async def links_page(request: Request) -> Response:
@@ -395,7 +544,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context = await page_context(request, api, "links")
             context |= {
                 "links": await api.get("/v1/tracking-links") or [],
+                # Both needed to create a link: a link belongs to a campaign,
+                # and a campaign belongs to an app.
+                "apps": await api.get("/v1/apps") or [],
+                "campaigns": await api.get("/v1/campaigns") or [],
                 "tracking_domain": tracking_domain,
+                "notice": request.query_params.get("notice"),
                 "error": None,
             }
             return render("links.html", context)
@@ -803,6 +957,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "conversion_values": [],
             "deep_links": [],
             "notice": None,
+            "new_key": None,
+            "campaigns_for_links": [],
             "integrations": [],
             "providers": [],
             "datasets": EXPORT_DATASETS,

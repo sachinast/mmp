@@ -686,3 +686,148 @@ def test_the_navigation_is_a_sidebar_with_grouped_sections():
     assert groups == sorted(groups, key=lambda g: groups.index(g)), (
         "NAV_ITEMS must keep each group contiguous"
     )
+
+
+# --- creating things through the UI --------------------------------------
+async def test_a_new_account_can_onboard_without_touching_the_api(signed_in):
+    """The path that was missing entirely.
+
+    Every create flow lived only in the API, so the honest instruction for a new
+    customer was "run these curl commands" — which is not a product. This walks
+    the whole way: app, campaign, tracking link, and a key to put in the SDK.
+    """
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+
+    created = await web.post(
+        "/apps",
+        data={
+            "csrf_token": csrf,
+            "name": "Onboarded",
+            "platform": "android",
+            "identifier": "com.example.onboarded",
+            "install_window_days": 7,
+            "event_window_days": 30,
+        },
+        follow_redirects=True,
+    )
+    assert "Onboarded" in created.text
+    assert "com.example.onboarded" in created.text
+
+    app_id = (await web.get("/apps")).text
+    import re
+
+    match = re.search(r'action="/apps/([0-9a-f-]{36})/keys"', app_id)
+    assert match, "the app row should offer to issue a key"
+
+    campaign = await web.post(
+        "/campaigns",
+        data={
+            "csrf_token": csrf,
+            "app_id": match.group(1),
+            "name": "Launch",
+            "source": "network_a",
+            "medium": "cpi",
+        },
+        follow_redirects=True,
+    )
+    assert "Launch" in campaign.text
+
+    campaign_id = re.search(r'name="campaign_id">\s*<option value="([0-9a-f-]{36})"', campaign.text)
+    assert campaign_id, "the new campaign should be selectable when creating a link"
+
+    link = await web.post(
+        "/links",
+        data={
+            "csrf_token": csrf,
+            "campaign_id": campaign_id.group(1),
+            "name": "launch-android",
+            "fallback_url": "https://example.com",
+        },
+        follow_redirects=True,
+    )
+    assert "launch-android" in link.text
+    assert "/c/" in link.text, "the link's tracking URL should be shown for copying"
+
+
+async def test_a_new_key_is_shown_in_the_page_never_in_the_url(signed_in):
+    """The raw key exists exactly once and only a hash of it is stored.
+
+    A redirect would put a live credential in the address bar, the browser's
+    history and every access log between here and the user — so this handler
+    renders its result instead of redirecting.
+    """
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    await web.post(
+        "/apps",
+        data={
+            "csrf_token": csrf,
+            "name": "Keyed",
+            "platform": "ios",
+            "identifier": "com.example.keyed",
+        },
+        follow_redirects=True,
+    )
+    import re
+
+    app_id = re.search(r'action="/apps/([0-9a-f-]{36})/keys"', (await web.get("/apps")).text).group(
+        1
+    )
+
+    response = await web.post(
+        f"/apps/{app_id}/keys",
+        data={"csrf_token": csrf, "kind": "sdk", "environment": "prod"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200, "the key page is rendered, not redirected to"
+    assert "mmp_" in response.text, "the raw key is shown once"
+    assert "cannot be shown again" in response.text
+    assert "location" not in response.headers
+
+
+async def test_creating_anything_without_a_csrf_token_never_reaches_the_api(signed_in, monkeypatch):
+    """Two checks guard these, and this one is about the near side.
+
+    The API rejects an unsigned request anyway — it requires the header
+    independently — so asserting "nothing was created" proves only that *a*
+    control worked, not this one. What distinguishes the dashboard's check is
+    that the request is never forwarded at all.
+    """
+    from mmp_web import app as web_app
+
+    forwarded: list[str] = []
+    original = web_app.ApiClient.post
+
+    async def recording_post(self, path, **kwargs):
+        forwarded.append(path)
+        return await original(self, path, **kwargs)
+
+    monkeypatch.setattr(web_app.ApiClient, "post", recording_post)
+
+    web = signed_in["client"]
+    for path, data in (
+        ("/apps", {"name": "NoCsrf", "platform": "android"}),
+        ("/campaigns", {"app_id": "x", "name": "NoCsrf"}),
+        ("/links", {"campaign_id": "x", "name": "NoCsrf", "fallback_url": "https://x.example"}),
+    ):
+        response = await web.post(path, data=data, follow_redirects=False)
+        assert response.status_code == 303
+
+    assert forwarded == [], f"an unsigned request was forwarded upstream: {forwarded}"
+    assert "NoCsrf" not in (await web.get("/apps")).text
+
+
+async def test_a_rejected_creation_shows_the_api_s_reason(signed_in):
+    """ "Something went wrong" is useless. The API knows the platform was
+    invalid or the name was too long, and that is what the user needs."""
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    response = await web.post(
+        "/apps",
+        data={"csrf_token": csrf, "name": "Bad", "platform": "windows_phone"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "notice=" in response.headers["location"]
+    assert "/apps?" in response.headers["location"]

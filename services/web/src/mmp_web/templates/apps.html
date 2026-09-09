@@ -6,7 +6,71 @@
 
 {% if error %}
   {% include "partials/error.html" %}
-{% elif not apps %}
+{% endif %}
+{% if notice %}
+  <div class="error" style="border-left-color: var(--good)">
+    <strong style="color: var(--good)">{{ notice }}</strong>
+  </div>
+{% endif %}
+
+{% if new_key %}
+  {# Shown here, in a response body, because this is the only time it exists.
+     The server stores an HMAC of it and nothing can retrieve it again. #}
+  <div class="error" style="border-left-color: var(--warn)">
+    <strong style="color: var(--warn)">Copy this key now — it cannot be shown again</strong>
+    <p class="meta" style="margin-top:8px">
+      {{ new_key.name }} · {{ new_key.environment }} · {{ new_key.kind }}
+    </p>
+    <p style="margin-top:8px"><code>{{ new_key.api_key }}</code></p>
+    <p class="meta" style="margin-top:8px">
+      An <code>sdk</code> key ships inside your app and is not a secret: it may only
+      write events for this app. An <code>s2s</code> key is a secret and is used with
+      request signing. Only a hash of this value is stored, so there is no way to
+      reveal it later — if it is lost, rotate.
+    </p>
+  </div>
+{% endif %}
+
+<div class="card" style="margin-bottom:18px">
+  <h2 style="margin-top:0">Add an app</h2>
+  <form class="inline" method="post" action="/apps">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div>
+      <label for="name">Name</label>
+      <input id="name" name="name" required maxlength="255" placeholder="Acme Shop">
+    </div>
+    <div>
+      <label for="platform">Platform</label>
+      <select id="platform" name="platform">
+        <option value="android">Android</option>
+        <option value="ios">iOS</option>
+        <option value="cross_platform">Both</option>
+      </select>
+    </div>
+    <div>
+      <label for="identifier">Package name or bundle id</label>
+      <input id="identifier" name="identifier" size="26" placeholder="com.acme.shop">
+    </div>
+    <div>
+      <label for="install_window_days">Install window</label>
+      <input id="install_window_days" name="install_window_days" type="number"
+             value="7" min="1" max="30" style="width:72px">
+    </div>
+    <div>
+      <label for="event_window_days">Event window</label>
+      <input id="event_window_days" name="event_window_days" type="number"
+             value="30" min="1" max="365" style="width:72px">
+    </div>
+    <button type="submit">Create app</button>
+  </form>
+  <p class="meta">
+    The identifier cannot be corrected once traffic has been attributed against
+    it, so it is worth checking now. The windows are how long after a click an
+    install counts, and how long after an install an event counts.
+  </p>
+</div>
+
+{% if not apps %}
   <div class="card">
     {% with title = "No apps yet",
             hint = "An app is the container for your tracking links, events and attributions." %}
@@ -20,6 +84,7 @@
         <tr>
           <th>Name</th><th>Platform</th><th>Identifier</th><th>Status</th>
           <th class="num">Install window</th><th class="num">Event window</th>
+          <th>Key</th>
         </tr>
       </thead>
       <tbody>
@@ -31,6 +96,20 @@
             <td><span class="pill {{ app.status }}">{{ app.status }}</span></td>
             <td class="num">{{ app.install_window_days }}d</td>
             <td class="num">{{ app.event_window_days }}d</td>
+            <td>
+              <form method="post" action="/apps/{{ app.id }}/keys" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <select name="kind" aria-label="Key kind">
+                  <option value="sdk">sdk</option>
+                  <option value="s2s">s2s</option>
+                </select>
+                <select name="environment" aria-label="Environment">
+                  <option value="prod">prod</option>
+                  <option value="dev">dev</option>
+                </select>
+                <button class="secondary" type="submit">Issue</button>
+              </form>
+            </td>
           </tr>
         {% endfor %}
       </tbody>

@@ -104,8 +104,18 @@ happened.
 Ten pages: overview, apps, tracking links, events, attribution, fraud,
 SKAdNetwork, deep links, integrations, export.
 
-**Still API-only:** creating an integration. It takes credentials, and a form
-that handles secrets deserves designing rather than adding.
+Apps, campaigns, tracking links and API keys are all created from the
+dashboard. Until recently none of them were: every create flow lived only in
+the API, so the honest instruction for a new customer was "run these curl
+commands", which is not a product.
+
+**Still API-only:** creating an integration. It takes a network's credentials,
+and a form that handles secrets deserves designing rather than adding.
+
+The key form renders its result rather than redirecting. The raw key exists
+exactly once — only an HMAC is stored — so a redirect would put a live
+credential in the address bar, the browser history, and every access log
+between the server and the user.
 
 Five bugs have now been found by *looking at the rendered page* rather than by
 any assertion. The most recent: export links pointed straight at the API, which
