@@ -87,6 +87,12 @@ def test_every_event_name_the_sdk_reserves_is_one_the_server_treats_specially() 
     assert match, "RESERVED_EVENTS not found in the SDK"
     reserved = set(re.findall(r'"([^"]+)"', match.group(1)))
 
+    # Both sides folded, because both sides now *match* on the folded form.
+    # Comparing the literals would fail on "consent_update" versus
+    # "consentupdate" while the behaviour was identical.
+    from mmp_ingest.schema import canonical_event_name
+
+    reserved = {canonical_event_name(name) for name in reserved}
     special = set(INSTALL_EVENTS) | set(IDENTITY_EVENTS) | {CONSENT_EVENT}
     assert reserved == special, (
         f"the SDK reserves {sorted(reserved)} but the server treats {sorted(special)} specially"

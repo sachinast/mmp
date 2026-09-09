@@ -23,6 +23,23 @@ and refuses them from `track()` — an app sending one by hand corrupts state it
 does not own. `install` drives attribution, `login`/`signup` drive identity
 resolution, `consent_update` carries a consent decision.
 
+**Matched on a folded form**, not literally: lowercased with separators
+removed. `Install`, `install`, `Sign-Up` and `sign up` all reach the handling
+they obviously intend.
+
+This is not tidiness. Every check used to be an exact match while validation
+only checked length, so an app sending `Install` was accepted, stored, and
+never attributed — no error anywhere, events arriving normally, and an install
+count of zero. A measurement platform cannot afford a failure with no signal,
+and "the documentation said lowercase" is no defence when the platform had
+every opportunity to understand what was meant.
+
+Only whole names fold: `signup_abandoned` is its own event, not a sign-up.
+
+The name is **stored exactly as sent**. Folding changes what the platform
+recognises, never what it reports: an app that calls its event `Purchase` sees
+`Purchase` in its reports and its exports.
+
 ## Sessions
 
 Assigned server-side at ingest, 30-minute inactivity window (matching the

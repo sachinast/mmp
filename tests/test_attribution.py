@@ -628,3 +628,116 @@ async def test_an_organic_install_is_recorded_clean_not_unknown(
     assert row["fraud_verdict"] == "clean"
     assert row["fraud_score"] == 0
     assert row["fraud_rules"] is None, "a clean row stores no rule list to read back"
+
+
+# ------------------------------------------------- reserved name matching
+async def test_a_capitalised_install_still_attributes(
+    tracker, click_consumer, attribution_consumer, owner_conn, seeded_app
+):
+    """The silent failure this guards against.
+
+    Every special-name check used to be an exact match while validation only
+    checked length, so an app sending "Install" was accepted, stored, and never
+    attributed — no error anywhere, events arriving normally, and an install
+    count of zero. Casing is not something a customer should lose a fortnight to.
+    """
+    response = await tracker.get(
+        f"/c/{seeded_app['tracking_code']}",
+        headers={"user-agent": ANDROID_UA},
+        follow_redirects=False,
+    )
+    play_referrer = unquote(parse_qs(urlparse(response.headers["location"]).query)["referrer"][0])
+    await flush_tracker(tracker)
+    await _drain(click_consumer)
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(
+                    event_name="Install",
+                    anonymous_id="device-capitalised",
+                    properties={"install_referrer": play_referrer},
+                )
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    await _drain(attribution_consumer)
+
+    row = await owner_conn.fetchrow(
+        "SELECT method FROM attributions WHERE app_id = $1 AND anonymous_id = 'device-capitalised'",
+        seeded_app["app_id"],
+    )
+    assert row is not None, "a capitalised install must still be attributed"
+    assert row["method"] == "referrer"
+
+
+async def test_the_event_name_is_stored_exactly_as_sent(
+    tracker, worker_consumer, owner_conn, seeded_app
+):
+    """Matching is folded; reporting is not. A customer who calls their event
+    "Purchase" sees "Purchase" in their reports and their exports."""
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(event_name="Install", anonymous_id="device-verbatim"),
+                sample_event(event_name="Checkout Started", anonymous_id="device-verbatim"),
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    await _drain(worker_consumer)
+
+    names = [
+        row["event_name"]
+        for row in await owner_conn.fetch(
+            "SELECT event_name FROM events WHERE app_id = $1 AND anonymous_id = 'device-verbatim'"
+            " ORDER BY event_name",
+            seeded_app["app_id"],
+        )
+    ]
+    assert names == ["Checkout Started", "Install"]
+
+
+async def test_a_hyphenated_signup_still_links_the_user(
+    tracker, click_consumer, attribution_consumer, seeded_app, ingest_redis
+):
+    """A hyphenated sign-up folds to "signup", so it resolves identity like the
+    canonical name rather than being stored as an ordinary event that links
+    nothing.
+
+    Asserted through the identity cache rather than by calling the folding
+    function: what matters is that a later server-to-server purchase carrying
+    only this user id can find the install, and only the real path proves that.
+    """
+    import msgspec
+    from mmp_attrib.store import CachedAttribution
+
+    await _click_then_install(tracker, click_consumer, attribution_consumer, seeded_app)
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(event_name="Sign-Up", anonymous_id="device-attr", user_id="user-77")
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+    await _drain(attribution_consumer)
+
+    aliased = await ingest_redis.get(f"attr:{seeded_app['app_id']}:user:user-77")
+    assert aliased is not None, "a hyphenated sign-up must link the user like 'signup' does"
+    assert msgspec.msgpack.Decoder(CachedAttribution).decode(aliased).method == "referrer"
+
+
+def test_folding_matches_only_whole_names() -> None:
+    from mmp_ingest.schema import canonical_event_name
+
+    assert canonical_event_name("Sign-Up") == "signup"
+    assert canonical_event_name("first_open") == "firstopen"
+    assert canonical_event_name("Checkout Started") == "checkoutstarted"
+    # A name that merely contains a reserved word is its own event.
+    assert canonical_event_name("signup_abandoned") != "signup"

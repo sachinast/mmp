@@ -25,7 +25,7 @@ from mmp_attrib.store import link_user, record
 from mmp_core.logging import get_logger
 from mmp_core.metrics import attributions, fraud_verdicts
 from mmp_db.pool import Database
-from mmp_ingest.schema import QueuedEvent
+from mmp_ingest.schema import QueuedEvent, canonical_event_name
 from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
 from redis.asyncio import Redis
 
@@ -37,6 +37,9 @@ ATTRIBUTION_GROUP = "attribution-writer"
 
 # Events that create or update an attribution. Everything else is a conversion,
 # which *reads* an attribution rather than producing one.
+# Compared against `canonical_event_name(...)`, never against the raw name.
+# "Install", "install" and "INSTALL" are the same intent, and an app that gets
+# the casing wrong should not silently go unattributed.
 INSTALL_EVENTS = frozenset({"install"})
 IDENTITY_EVENTS = frozenset({"login", "signup"})
 
@@ -158,7 +161,8 @@ class AttributionConsumer:
         return config
 
     async def _handle(self, event: QueuedEvent) -> None:
-        if event.event_name in IDENTITY_EVENTS and event.user_id:
+        canonical = canonical_event_name(event.event_name)
+        if canonical in IDENTITY_EVENTS and event.user_id:
             await link_user(
                 self._redis,
                 app_id=uuid.UUID(event.app_id),
@@ -167,7 +171,7 @@ class AttributionConsumer:
             )
             return
 
-        if event.event_name not in INSTALL_EVENTS:
+        if canonical not in INSTALL_EVENTS:
             return
 
         app_id = uuid.UUID(event.app_id)

@@ -26,6 +26,17 @@ export const LIMITS = {
  */
 export const RESERVED_EVENTS = ["install", "login", "signup", "consent_update"] as const;
 
+/**
+ * Fold an event name to the form reserved names are matched on — lowercase,
+ * separators removed. Mirrors `canonical_event_name` on the server, and the
+ * contract test asserts the two agree.
+ *
+ * The name is only folded for *matching*. What gets sent is what you passed.
+ */
+export function canonicalEventName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export interface EventProperties {
   [key: string]: unknown;
 }

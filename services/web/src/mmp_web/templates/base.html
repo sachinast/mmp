@@ -24,18 +24,49 @@
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    nav {
-      display: flex; align-items: center; gap: 4px; padding: 10px 20px;
-      border-bottom: 1px solid var(--border); background: var(--surface);
-      flex-wrap: wrap;
+    /* Sidebar rather than a top bar. Ten destinations is too many to scan
+       horizontally, and a vertical list has room for the grouping that makes
+       them findable — it also gives tables the full width of the page, which
+       is what most of these pages are. */
+    .shell { display: flex; min-height: 100vh; align-items: stretch; }
+    .sidebar {
+      width: 210px; flex: 0 0 210px; background: var(--surface);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column;
+      padding: 16px 12px;
+      /* Sticky rather than fixed: the content scrolls past a nav that stays
+         put, without taking the sidebar out of flow and having to reserve its
+         width by hand. */
+      position: sticky; top: 0; align-self: flex-start; height: 100vh;
+      overflow-y: auto;
     }
-    nav .brand { font-weight: 700; margin-right: 14px; color: var(--accent); }
-    nav a.item { color: var(--muted); padding: 5px 10px; border-radius: var(--radius); }
-    nav a.item:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
-    nav a.item.active { background: var(--surface-2); color: var(--text); }
-    nav .spacer { flex: 1; }
-    nav .who { color: var(--muted); font-size: 13px; }
-    main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+    .sidebar .brand {
+      font-weight: 700; color: var(--accent); font-size: 15px;
+      padding: 4px 10px 10px; letter-spacing: .3px;
+    }
+    .sidebar .links { display: flex; flex-direction: column; gap: 2px; }
+    .sidebar .group {
+      color: var(--muted); font-size: 10px; text-transform: uppercase;
+      letter-spacing: .8px; padding: 14px 10px 5px;
+    }
+    .sidebar a.item {
+      color: var(--muted); padding: 7px 10px; border-radius: var(--radius);
+      display: block; font-size: 13px;
+      /* Transparent on every item, coloured only when active, so a label does
+         not shift sideways as you move between pages. */
+      border-left: 2px solid transparent;
+    }
+    .sidebar a.item:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+    .sidebar a.item.active {
+      background: var(--surface-2); color: var(--text); border-left-color: var(--accent);
+    }
+    .sidebar .spacer { flex: 1; min-height: 20px; }
+    .sidebar .account { border-top: 1px solid var(--border); padding-top: 10px; }
+    .sidebar .who { display: block; color: var(--muted); font-size: 12px;
+                    padding: 0 10px 8px; word-break: break-word; }
+    .sidebar .who strong { display: block; color: var(--text); font-weight: 600; }
+    .sidebar .account form { padding: 0 10px; }
+    .sidebar .account button { width: 100%; }
+    main { flex: 1; min-width: 0; max-width: 1180px; padding: 24px 24px 64px; }
     h1 { font-size: 20px; margin-bottom: 4px; }
     h2 { font-size: 15px; margin: 28px 0 10px; }
     .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
@@ -104,25 +135,81 @@
     .htmx-request .loading { display: block; }
     .loading { display: none; color: var(--muted); font-size: 12px; padding: 8px 0; }
     .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+    /* Narrow screens: two compact rows — brand and account on one, the sections
+       on a single scrolling row beneath. Letting them wrap cost four rows and
+       nearly 400px before any content began.
+
+       No JavaScript and no drawer: a toggle that needs a script is a toggle
+       that breaks under this page's own content-security policy. */
+    @media (max-width: 860px) {
+      .shell { display: block; }
+      .sidebar {
+        width: auto; flex: none; height: auto; position: static;
+        border-right: 0; border-bottom: 1px solid var(--border);
+        display: grid; grid-template-columns: auto 1fr;
+        align-items: center; padding: 10px 14px; gap: 8px 12px;
+      }
+      .sidebar .brand { padding: 0; }
+      .sidebar .spacer { display: none; }
+      .sidebar .account {
+        display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+        border-top: 0; padding: 0; min-width: 0;
+      }
+      .sidebar .who {
+        padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .sidebar .who strong { display: inline; }
+      .sidebar .account form { padding: 0; }
+      .sidebar .account button { width: auto; white-space: nowrap; }
+      .sidebar .links {
+        grid-column: 1 / -1; flex-direction: row; overflow-x: auto; padding-bottom: 2px;
+      }
+      .sidebar .group { display: none; }
+      .sidebar a.item {
+        border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap;
+      }
+      .sidebar a.item.active { border-left-color: transparent; border-bottom-color: var(--accent); }
+      main { max-width: none; padding: 20px 14px 48px; }
+    }
   </style>
 </head>
 <body>
-{% if user %}
-<nav>
-  <span class="brand">MMP</span>
-  {% for item in nav_items %}
-    <a class="item {% if item.key == active %}active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
-  {% endfor %}
-  <span class="spacer"></span>
-  <span class="who">{{ organization.name if organization else '' }} · {{ user.email }}</span>
-  <form method="post" action="/logout" style="display:inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="secondary" type="submit">Sign out</button>
-  </form>
-</nav>
-{% endif %}
-<main>
-  {% block content %}{% endblock %}
-</main>
+{# One shell, with the sidebar rendered only when somebody is signed in. The
+   content block is defined exactly once — Jinja forbids two, and duplicating it
+   inside an if/else is the obvious thing to reach for. #}
+<div class="shell">
+  {% if user %}
+  <aside class="sidebar">
+    <span class="brand">MMP</span>
+    <nav class="links" aria-label="Sections">
+      {% set seen = namespace(group=None) %}
+      {% for item in nav_items %}
+        {% if item.group != seen.group %}
+          <span class="group">{{ item.group }}</span>
+          {% set seen.group = item.group %}
+        {% endif %}
+        <a class="item {% if item.key == active %}active{% endif %}"
+           href="{{ item.href }}"
+           {% if item.key == active %}aria-current="page"{% endif %}>{{ item.label }}</a>
+      {% endfor %}
+    </nav>
+    <span class="spacer"></span>
+    <div class="account">
+      <span class="who">
+        <strong>{{ organization.name if organization else '' }}</strong>
+        {{ user.email }}
+      </span>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="secondary" type="submit">Sign out</button>
+      </form>
+    </div>
+  </aside>
+  {% endif %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</div>
 </body>
 </html>

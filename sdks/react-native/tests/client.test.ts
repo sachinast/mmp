@@ -416,3 +416,31 @@ describe("skadnetwork conversion values", () => {
     await expect(client.track("purchase")).resolves.toBeUndefined();
   });
 });
+
+
+describe("reserved names", () => {
+  it.each(["install", "Install", "INSTALL", "login", "Login", "Sign-Up", "sign up", "consent_update"])(
+    "refuses %o, however it is spelled",
+    async (name) => {
+      // The SDK sends these itself. Letting `Install` through would have it
+      // handled as an ordinary event — accepted, stored, never attributed.
+      const h = harness();
+      await h.client.initialize();
+      const before = h.sent.length;
+      await h.client.track(name);
+      await h.client.flush();
+      const added = h.sent.slice(before).filter((e) => e.event_name === name);
+      expect(added).toHaveLength(0);
+    },
+  );
+
+  it("allows a name that merely contains a reserved word", async () => {
+    // "signup_abandoned" is a real event an app might have. Only an exact
+    // canonical match is reserved.
+    const h = harness();
+    await h.client.initialize();
+    await h.client.track("signup_abandoned");
+    await h.client.flush();
+    expect(h.sent.some((e) => e.event_name === "signup_abandoned")).toBe(true);
+  });
+});

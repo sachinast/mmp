@@ -24,6 +24,7 @@ from mmp_ingest.schema import (
     EventBatch,
     QueuedEvent,
     ValidationFailure,
+    canonical_event_name,
     validate_event,
 )
 from starlette.requests import Request
@@ -271,7 +272,10 @@ async def _assign_sessions(state: TrackerState, app_id: str, events: list[Queued
 # The event an SDK sends to report a consent decision. Handled as a normal event
 # so it travels the same authenticated, rate-limited, validated path as anything
 # else, rather than needing an endpoint of its own with its own auth.
-CONSENT_EVENT = "consent_update"
+# Matched canonically, so "consent_update", "Consent-Update" and "consentUpdate"
+# all record the user's decision rather than becoming an ordinary event that
+# quietly fails to apply it.
+CONSENT_EVENT = "consentupdate"
 
 
 async def _apply_consent(
@@ -288,7 +292,7 @@ async def _apply_consent(
     flushing after the user accepted a dialogue sends exactly that batch.
     """
     for event in events:
-        if event.event_name != CONSENT_EVENT:
+        if canonical_event_name(event.event_name) != CONSENT_EVENT:
             continue
         states: dict[Purpose, State] = {}
         for key, value in (event.properties or {}).items():

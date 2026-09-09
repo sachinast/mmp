@@ -56,7 +56,19 @@ Two mistakes worth avoiding, because both look like the SDK working:
   `Math.random`. A weak device id merges two people's data.
 
 `initialize` sends the install event itself. Do not send `install`, `login`,
-`signup` or `consent_update` yourself — the SDK owns them.
+`signup` or `consent_update` yourself — the SDK owns them, and it refuses them
+from `track()` however you capitalise or punctuate them.
+
+That matters for naming your own events. Reserved names are matched on a folded
+form — lowercased, separators removed — so `Install`, `Sign-Up` and `sign up`
+are all the reserved name. If your analytics plan lists an event called
+`Sign-Up`, the SDK is already sending it; call `MMP.setUserId(...)` instead and
+it is handled for you.
+
+Anything that does not fold to a reserved name is yours: `first_open`,
+`Checkout Started`, `mining_started`, `withdrawal_requested` and
+`ad_failed_to_load` all work as written, including the space and the
+capitals. Names are stored exactly as you send them.
 
 ## 3. Track events
 
@@ -77,13 +89,19 @@ request. This is the path an `s2s` key exists for.
 ```python
 import hashlib, hmac, json, time, requests
 
-body = json.dumps({"events": [{
-    "event_name": "purchase",
-    "anonymous_id": "device-abc",
-    "event_id": "018f...",          # UUIDv7 you mint and keep across retries
-    "revenue_minor": 499,
-    "currency": "USD",
-}]}).encode()
+body = json.dumps(
+    {
+        "events": [
+            {
+                "event_name": "purchase",
+                "anonymous_id": "device-abc",
+                "event_id": "018f...",  # UUIDv7 you mint and keep across retries
+                "revenue_minor": 499,
+                "currency": "USD",
+            }
+        ]
+    }
+).encode()
 
 timestamp = str(int(time.time()))
 digest = hashlib.sha256(body).hexdigest()

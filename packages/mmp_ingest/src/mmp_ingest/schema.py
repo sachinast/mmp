@@ -116,6 +116,27 @@ class QueuedEvent(msgspec.Struct):
     correlation_id: str | None = None
 
 
+def canonical_event_name(name: str) -> str:
+    """Fold an event name to the form the platform matches reserved names on.
+
+    Lowercased with separators removed, so ``Install``, ``install``,
+    ``Sign-Up`` and ``sign up`` all reach the handling they obviously intend.
+
+    This exists because the alternative was a silent failure. Every
+    special-name check used to be an exact match, and validation only checked
+    length — so an app sending ``Install`` was accepted, stored, and never
+    attributed. No error anywhere: the events arrive, the dashboard shows them,
+    and the install count is simply zero. That is the worst shape a bug can
+    take in a measurement platform, and "the docs said lowercase" is no defence
+    when the platform had every opportunity to understand what was meant.
+
+    The name is still **stored exactly as sent**. This changes what the
+    platform recognises, never what it reports back: a customer who names their
+    event ``Purchase`` sees ``Purchase`` in their reports and their exports.
+    """
+    return "".join(character for character in name.lower() if character.isalnum())
+
+
 def _parse_timestamp(value: str | None, *, now: dt.datetime) -> tuple[dt.datetime, int | None]:
     """Return the client timestamp and its skew from server time.
 

@@ -41,17 +41,21 @@ log = get_logger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+# Grouped, because ten flat items is a list to read rather than a structure to
+# navigate. The groups follow what someone is doing — looking at numbers,
+# checking whether to trust them, or changing configuration — rather than which
+# service happens to serve each page.
 NAV_ITEMS = [
-    {"key": "overview", "label": "Overview", "href": "/"},
-    {"key": "apps", "label": "Apps", "href": "/apps"},
-    {"key": "links", "label": "Tracking links", "href": "/links"},
-    {"key": "events", "label": "Events", "href": "/events"},
-    {"key": "attribution", "label": "Attribution", "href": "/attribution"},
-    {"key": "fraud", "label": "Fraud", "href": "/fraud"},
-    {"key": "skan", "label": "SKAdNetwork", "href": "/skan"},
-    {"key": "deeplinks", "label": "Deep links", "href": "/deep-links"},
-    {"key": "integrations", "label": "Integrations", "href": "/integrations"},
-    {"key": "export", "label": "Export", "href": "/export"},
+    {"key": "overview", "label": "Overview", "href": "/", "group": "Measure"},
+    {"key": "apps", "label": "Apps", "href": "/apps", "group": "Measure"},
+    {"key": "links", "label": "Tracking links", "href": "/links", "group": "Measure"},
+    {"key": "events", "label": "Events", "href": "/events", "group": "Measure"},
+    {"key": "attribution", "label": "Attribution", "href": "/attribution", "group": "Measure"},
+    {"key": "fraud", "label": "Fraud", "href": "/fraud", "group": "Trust"},
+    {"key": "skan", "label": "SKAdNetwork", "href": "/skan", "group": "Trust"},
+    {"key": "deeplinks", "label": "Deep links", "href": "/deep-links", "group": "Configure"},
+    {"key": "integrations", "label": "Integrations", "href": "/integrations", "group": "Configure"},
+    {"key": "export", "label": "Export", "href": "/export", "group": "Configure"},
 ]
 
 # The datasets the export page offers, with a sentence each on what is in them.

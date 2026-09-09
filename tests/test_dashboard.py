@@ -581,3 +581,71 @@ async def test_an_unknown_dataset_never_reaches_the_api(signed_in, monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"] == "/export"
     assert called == [], f"the unknown dataset was forwarded upstream: {called}"
+
+
+def test_every_class_the_templates_use_is_actually_styled():
+    """The stylesheet is inline, and I once deleted most of it.
+
+    A careless edit removed `.card`, `.pill`, `.table-wrap`, the table rules and
+    the form styles. Every one of the 47 tests still passed, because they assert
+    content and structure and never look at presentation — the pages rendered
+    with the right words and no styling at all, which is exactly the shape of
+    bug that only opening the page catches.
+
+    This is the mechanical half of that check: any class a template applies must
+    have a rule somewhere in the stylesheet.
+    """
+    import re
+    from pathlib import Path
+
+    templates = Path("services/web/src/mmp_web/templates")
+    stylesheet = (templates / "base.html").read_text()
+
+    # Classes that are hooks for behaviour or state rather than presentation,
+    # and legitimately have no rule of their own.
+    exempt = {
+        "active",
+        "secondary",
+        "inline",
+        "num",
+        "none",
+        "brand",
+        "who",
+        "group",
+        "item",
+        "links",
+        "account",
+        "spacer",
+        "value",
+        "label",
+    }
+
+    missing: list[str] = []
+    for template in templates.rglob("*.html"):
+        source = template.read_text()
+        # A template may carry its own <style>: the login page is standalone and
+        # does not extend the shell, so its rules live inside it.
+        available = stylesheet + source
+        used: set[str] = set()
+        for attribute in re.findall(r'class="([^"{}]+)"', source):
+            used.update(attribute.split())
+        missing += [
+            f"{template.name}:{name}"
+            for name in sorted(used - exempt)
+            if f".{name}" not in available
+        ]
+
+    assert not missing, f"templates use classes with no styling: {missing}"
+
+
+def test_the_navigation_is_a_sidebar_with_grouped_sections():
+    from mmp_web.app import NAV_ITEMS
+
+    groups = [item["group"] for item in NAV_ITEMS]
+    assert set(groups) == {"Measure", "Trust", "Configure"}
+    # Items must be ordered so each group is contiguous — the template emits a
+    # heading whenever the group changes, so a stray item would print its
+    # heading twice.
+    assert groups == sorted(groups, key=lambda g: groups.index(g)), (
+        "NAV_ITEMS must keep each group contiguous"
+    )

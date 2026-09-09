@@ -28,6 +28,7 @@ import { Transport } from "./transport";
 import {
   LIMITS,
   RESERVED_EVENTS,
+  canonicalEventName,
   type ConsentUpdate,
   type EventProperties,
   type Logger,
@@ -184,8 +185,15 @@ export class MmpClient {
   }
 
   async track(eventName: string, options: TrackOptions = {}): Promise<void> {
-    if ((RESERVED_EVENTS as readonly string[]).includes(eventName)) {
-      this.logger.error("mmp: that event name is reserved by the SDK", { eventName });
+    // Compared canonically, matching the server. Otherwise `track("Install")`
+    // is allowed through here and then handled as an ordinary event, which is
+    // the silent-failure shape this whole check exists to prevent.
+    const reserved = (RESERVED_EVENTS as readonly string[]).map(canonicalEventName);
+    if (reserved.includes(canonicalEventName(eventName))) {
+      this.logger.error(
+        "mmp: that event name is reserved — the SDK sends it for you",
+        { eventName },
+      );
       return;
     }
     await this.enqueue(eventName, options);
