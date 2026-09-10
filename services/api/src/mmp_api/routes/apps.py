@@ -12,7 +12,8 @@ from mmp_core.logging import get_logger
 from mmp_db.notify import notify_app_changed
 from mmp_db.types import DbConn
 
-from mmp_api.deps import Principal, require_role, tenant_db
+from mmp_api.context import AppContext
+from mmp_api.deps import Principal, get_context, require_role, tenant_db
 from mmp_api.schemas import AppCreate, AppOut, AppUpdate
 from mmp_db import sql
 
@@ -140,6 +141,7 @@ async def update_app(
 async def disable_app(
     app_id: uuid.UUID,
     principal: Annotated[Principal, Depends(require_role("admin"))],
+    context: Annotated[AppContext, Depends(get_context)],
     conn: Annotated[DbConn, Depends(tenant_db)],
 ) -> None:
     """Disable, never delete.
@@ -147,11 +149,26 @@ async def disable_app(
     Deleting an app would cascade to its campaigns and attribution history —
     numbers a client may have already reported to an ad network. Disabling stops
     ingestion and leaves the record intact.
+
+    "Stops ingestion" has to be true now rather than eventually. The tracker
+    authenticates against a cached key record that carries the app's status, so
+    without clearing those entries a disabled app kept accepting events for up
+    to ten minutes — and its links kept redirecting until the link cache was
+    told, which is what the notification below is for.
     """
     result = await conn.execute(
         "UPDATE apps SET status = 'disabled', updated_at = now() WHERE id = $1", app_id
     )
     if result == "UPDATE 0":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "app not found")
+
+    # Every key for this app, so ingestion stops now. The cache is keyed by
+    # prefix, which is why the prefixes are read rather than the keys.
+    prefixes = await conn.fetch(
+        "SELECT key_prefix FROM api_keys WHERE app_id = $1 AND status = 'active'", app_id
+    )
+    if prefixes:
+        await context.redis.delete(*[f"apikey:{row['key_prefix']}" for row in prefixes])
+
     await notify_app_changed(conn, str(app_id))
     log.info("app_disabled", app_id=str(app_id), actor=str(principal.user_id))

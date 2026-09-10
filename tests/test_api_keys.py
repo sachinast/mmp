@@ -224,3 +224,56 @@ async def test_active_key_count_is_capped(account):
     for _ in range(MAX_ACTIVE_KEYS_PER_APP + 1):
         last = await account.post(f"/v1/apps/{app['id']}/keys", json={"environment": "dev"})
     assert last.status_code == 409
+
+
+async def test_disabling_an_app_stops_ingestion_immediately(account, api_client):
+    """ "Disabling stops ingestion" has to mean now, not in ten minutes.
+
+    The tracker authenticates against a cached key record carrying the app's
+    status. Without clearing those entries a disabled app kept accepting events
+    until the cache expired — and the docstring promising otherwise was the only
+    thing anyone would have read.
+    """
+    created = await account.post(
+        "/v1/apps",
+        json={"name": "Doomed", "platform": "android", "android_package_name": "com.x.doomed"},
+    )
+    app_id = created.json()["id"]
+    key = await account.post(f"/v1/apps/{app_id}/keys", json={"name": "k", "kind": "sdk"})
+    prefix = key.json()["key_prefix"]
+
+    context = api_client._transport.app.state.context  # type: ignore[attr-defined]
+    # Prime the cache the way an authenticated ingest would.
+    await context.redis.set(f"apikey:{prefix}", b"cached", ex=600)
+    assert await context.redis.exists(f"apikey:{prefix}")
+
+    disabled = await account.delete(f"/v1/apps/{app_id}")
+    assert disabled.status_code == 204, disabled.text
+
+    assert not await context.redis.exists(f"apikey:{prefix}"), (
+        "a disabled app's cached keys must be cleared, or it keeps ingesting"
+    )
+
+
+async def test_rotating_a_key_stops_the_old_one_at_once(account, api_client):
+    """Rotation revokes, and a revocation the cache has not been told about is
+    not a revocation. The old key used to keep working for up to ten minutes."""
+    created = await account.post(
+        "/v1/apps",
+        json={"name": "Rotator", "platform": "ios", "ios_bundle_id": "com.x.rot"},
+    )
+    app_id = created.json()["id"]
+    first = await account.post(f"/v1/apps/{app_id}/keys", json={"name": "k", "kind": "sdk"})
+    key_id = first.json()["id"]
+    old_prefix = first.json()["key_prefix"]
+
+    context = api_client._transport.app.state.context  # type: ignore[attr-defined]
+    await context.redis.set(f"apikey:{old_prefix}", b"cached", ex=600)
+
+    rotated = await account.post(f"/v1/apps/{app_id}/keys/{key_id}/rotate", json={})
+    assert rotated.status_code in (200, 201), rotated.text
+    assert rotated.json()["key_prefix"] != old_prefix
+
+    assert not await context.redis.exists(f"apikey:{old_prefix}"), (
+        "the rotated-away key must stop working at once"
+    )

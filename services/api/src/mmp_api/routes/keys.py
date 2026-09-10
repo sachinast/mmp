@@ -132,12 +132,21 @@ async def rotate_key(
 ) -> ApiKeyCreated:
     """Issue a replacement key and revoke the old one.
 
-    Rotation creates the new key *before* revoking the old one so that the
-    caller never holds zero working credentials. Overlap is the point: an app
-    with a live SDK cannot swap credentials atomically.
+    The new key is created before the old one is revoked, inside a transaction,
+    so the caller never holds zero working credentials at any instant.
+
+    That is the only overlap there is. The old key stops working immediately —
+    the database says revoked and the tracker's cache is cleared to match, the
+    same as an outright revocation, because rotation is usually done for the
+    same reason. This used to leave the old key live for up to ten minutes: the
+    row said revoked and the cache had not been told, so the grace period was an
+    accident of a TTL rather than anything anyone chose.
+
+    A genuine timed overlap — old key valid until a stated moment — would be a
+    `revoke_at` column and a deliberate feature, not a stale cache.
     """
     existing = await conn.fetchrow(
-        "SELECT name, kind, environment FROM api_keys WHERE id = $1 AND app_id = $2",
+        "SELECT name, kind, environment, key_prefix FROM api_keys WHERE id = $1 AND app_id = $2",
         key_id,
         app_id,
     )
@@ -168,6 +177,11 @@ async def rotate_key(
         await conn.execute(
             "UPDATE api_keys SET status = 'revoked', revoked_at = now() WHERE id = $1", key_id
         )
+
+    # Outside the transaction, and for the same reason as revoke_key: the
+    # tracker caches authenticated keys, so a revocation the cache has not been
+    # told about is not a revocation.
+    await context.redis.delete(f"apikey:{existing['key_prefix']}")
 
     log.info(
         "api_key_rotated",
