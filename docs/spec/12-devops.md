@@ -63,8 +63,28 @@ deployment step, not a code change.
 network-isolated so a bypass has an outer layer to fail against. This is
 [an open production blocker](../PRODUCTION_CHECKLIST.md).
 
-**CI.** The gates exist as `make` targets and are designed to run unattended.
-Wiring them to a CI provider is unstarted.
+**CI** runs on GitHub Actions (`.github/workflows/ci.yml`), on every push to
+`main` and every pull request:
+
+- `check` (ubuntu) — lint, `mypy --strict`, bandit, `pip-audit`, migrations
+  against a real PostgreSQL, the full pytest suite, and the SDK's typecheck and
+  tests.
+- `android` (ubuntu) — compiles and lints the Kotlin against a real Android SDK.
+  This is the only place the Kotlin is compiled at all.
+
+Two targets skip when their toolchain is absent, so `make check` still works on
+a machine without Node or an Android SDK. That is exactly wrong in CI, where a
+broken setup step would leave the job green and nothing would run — so
+`MMP_REQUIRE_SDK` and `MMP_REQUIRE_ANDROID` turn those skips into failures, and
+CI sets both.
+
+**Not in CI:** `make sdk-ios` and `make sdk-ios-device` need a macOS runner,
+which bills at ten times the rate of Linux on a private repository. They run in
+`make check` locally on every change. Enabling a macOS job is a cost decision,
+not a technical one.
+
+`make bench` is also absent: it compares latency against a recorded baseline,
+and a shared runner's timing noise would make it flake rather than inform.
 
 ## Configuration
 
@@ -91,8 +111,7 @@ the drill is the point, not the dump.
 
 ## Open
 
-1. No CI configuration.
-2. No infrastructure-as-code.
-3. No deployed environment, so no real SLO.
-4. No alerting rules — metrics are exposed, nothing consumes them.
-5. No log aggregation configured.
+1. No infrastructure-as-code.
+2. No deployed environment, so no real SLO.
+3. No alerting rules — metrics are exposed, nothing consumes them.
+4. No log aggregation configured.

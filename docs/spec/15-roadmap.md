@@ -43,8 +43,9 @@ four are not engineering tasks, which is why they have stayed open.
 11. **Datacenter-IP fraud detection.** A strong signal, deliberately absent: IPs
     are hashed at the edge, so classification must happen in the tracker against
     a maintained CIDR list. Real work with a real data dependency.
-12. **CI configuration.** The gates exist as `make` targets and run unattended;
-    nothing runs them automatically.
+12. **A macOS CI job.** The Swift typecheck and the simulator run happen only on
+    a developer's machine. macOS runners bill at ten times Linux on a private
+    repository, so turning this on is a cost decision.
 13. **A machine-to-machine read credential.** The management API assumes a
     session, which suits a dashboard and not a partner integration.
 

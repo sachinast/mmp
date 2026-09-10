@@ -28,7 +28,7 @@ worker: ## Run the background worker
 	set -a; . ./.env; set +a; $(PY) python -m mmp_worker.main
 
 # ---------------------------------------------------------------- quality
-check: lint typecheck security test sdk sdk-ios ## Everything CI runs
+check: lint typecheck security test sdk sdk-ios ## Every gate; CI adds the Android compile
 
 lint: ## Ruff lint + format check
 	$(PY) ruff check .
@@ -56,9 +56,16 @@ SDK := sdks/react-native
 
 sdk: ## Typecheck and test the React Native SDK
 # Skipped rather than failed when node_modules is absent, so a Python-only
-# checkout still runs `make check`. CI installs them, so CI runs it for real.
+# checkout still runs `make check`.
+#
+# MMP_REQUIRE_SDK=1 turns that skip into a failure, and CI sets it. Otherwise a
+# failed `npm ci` step would leave this reporting success and the SDK's tests
+# would quietly stop running — the same trap as sdk-android, and the reason
+# neither of them had been running in CI at all.
 	@if [ -d $(SDK)/node_modules ]; then \
 	  cd $(SDK) && npm run --silent typecheck && npm run --silent test; \
+	elif [ -n "$$MMP_REQUIRE_SDK" ]; then \
+	  echo "sdk: FAILED (node_modules absent)" >&2; exit 1; \
 	else \
 	  echo "sdk: skipped (run 'make sdk-setup' to install its dev dependencies)"; \
 	fi
@@ -91,15 +98,27 @@ sdk-ios-device: ## Run the iOS native core on a simulator and check its invarian
 sdk-android: ## Compile the Android native module
 # One shell block on purpose: make runs each recipe line in its own shell, so an
 # `exit 0` in an earlier line does not skip the later ones — which is exactly
-# how the first version of this target ran gradle anyway and failed on a machine
-# that had deliberately been told it had no toolchain.
-	@sdk="$${ANDROID_HOME:-$$HOME/Library/Android/sdk}"; \
+# how the first version of this target ran gradle anyway on a machine that had
+# deliberately been told it had no toolchain.
+#
+# Skipping keeps `make check` usable on a machine without an Android toolchain.
+# In CI that is exactly wrong: a broken toolchain step would leave this target
+# quietly reporting success and nothing would ever compile the Kotlin. Set
+# MMP_REQUIRE_ANDROID=1 there and a missing toolchain fails instead.
+	@sdk="$${ANDROID_HOME:-$${ANDROID_SDK_ROOT:-$$HOME/Library/Android/sdk}}"; \
+	missing=""; \
 	if [ -z "$$JAVA_HOME" ] || [ ! -x "$$JAVA_HOME/bin/java" ]; then \
-	  echo "sdk-android: skipped (set JAVA_HOME to a JDK 17-21; Gradle cannot run on 25)"; \
+	  missing="set JAVA_HOME to a JDK 17-21 (Gradle cannot run on 25)"; \
 	elif [ ! -d "$$sdk" ]; then \
-	  echo "sdk-android: skipped (no Android SDK; set ANDROID_HOME)"; \
+	  missing="no Android SDK; set ANDROID_HOME"; \
 	elif ! command -v gradle >/dev/null 2>&1; then \
-	  echo "sdk-android: skipped (gradle not on PATH)"; \
+	  missing="gradle not on PATH"; \
+	fi; \
+	if [ -n "$$missing" ]; then \
+	  if [ -n "$$MMP_REQUIRE_ANDROID" ]; then \
+	    echo "sdk-android: FAILED ($$missing)" >&2; exit 1; \
+	  fi; \
+	  echo "sdk-android: skipped ($$missing)"; \
 	else \
 	  cd $(SDK)/android && \
 	  echo "sdk.dir=$$sdk" > local.properties && \

@@ -72,3 +72,43 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+      # The SDK's 96 tests and its typecheck. `make check` has run these
+      # locally since the SDK existed; CI never has, because this file was
+      # written in Phase 1 and the SDK arrived in Phase 12.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdks/react-native/package-lock.json
+      # `npm ci` rather than the `make sdk-setup` a developer runs: it installs
+      # exactly the lockfile and fails if package.json has drifted from it,
+      # which is the difference that matters on a machine nobody is watching.
+      - name: SDK tests
+        env:
+          MMP_REQUIRE_SDK: "1"
+        run: |
+          npm ci --prefix sdks/react-native --no-audit --no-fund
+          make sdk
+
+  android:
+    name: Compile the Android module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 21, not the 25 Android Studio bundles: Gradle cannot run on 25.
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      # MMP_REQUIRE_ANDROID turns the target's "skipped" into a failure. Without
+      # it a broken toolchain step above would leave this job green while
+      # nothing compiled — which is the failure mode the whole job exists to
+      # close, the Kotlin having never been compiled anywhere until now.
+      - name: Compile and lint
+        env:
+          MMP_REQUIRE_ANDROID: "1"
+        run: make sdk-android
