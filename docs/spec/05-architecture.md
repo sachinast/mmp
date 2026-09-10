@@ -95,7 +95,7 @@ can go unapplied:
 
 | Cache | Freshness |
 |---|---|
-| Tracker link cache | `LISTEN`/`NOTIFY` plus a five-minute resync |
+| Tracker link cache | `LISTEN`/`NOTIFY` on links, deep links and apps, plus a five-minute resync |
 | Worker app settings | 60-second TTL |
 
 The worker's uses a TTL rather than a notification on purpose. The link cache

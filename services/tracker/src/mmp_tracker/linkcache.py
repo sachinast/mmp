@@ -9,8 +9,8 @@ So the whole active link set lives in a dict in each tracker process. It is
 small — a few hundred bytes per link, so a hundred thousand links is tens of
 megabytes — and it is kept fresh two ways:
 
-* **``LISTEN``/``NOTIFY``.** The API calls ``pg_notify`` when a link or a deep
-  link changes — an application call, not a database trigger; this schema has
+* **``LISTEN``/``NOTIFY``.** The API calls ``pg_notify`` when a link, a deep
+  link, or an app changes — an application call, not a database trigger; this schema has
   none. Propagation is typically milliseconds, which is what makes "I disabled
   that link" mean something.
 * **A periodic full resync.** Notifications are fire-and-forget: a process that
@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 import asyncpg
 from mmp_core.logging import get_logger
-from mmp_db.notify import DEEP_LINKS_CHANNEL, TRACKING_LINKS_CHANNEL
+from mmp_db.notify import APPS_CHANNEL, DEEP_LINKS_CHANNEL, TRACKING_LINKS_CHANNEL
 from mmp_db.pool import Database
 
 log = get_logger(__name__)
@@ -74,6 +74,15 @@ WHERE l.status = 'active' AND a.status = 'active'
 # same reason the links are: the redirect must not query Postgres, and a code
 # that is not in this dict is simply not honoured — there is no fallback lookup,
 # so a flood of invented codes costs nothing.
+LOAD_APP_LINKS_SQL = """
+SELECT l.id, l.tracking_code, l.organization_id, l.app_id, l.campaign_id,
+       l.android_url, l.ios_url, l.fallback_url, l.deep_link_path, l.status,
+       a.status AS app_status
+FROM tracking_links l
+JOIN apps a ON a.id = l.app_id
+WHERE l.app_id = $1
+"""
+
 LOAD_DEEP_LINKS_FOR_APP_SQL = """
 SELECT d.app_id, d.code, d.destination, d.fallback_url
 FROM deep_links d
@@ -174,7 +183,11 @@ class LinkCache:
         self._listener = await asyncpg.connect(self._database.dsn, statement_cache_size=0)
         await self._listener.add_listener(CHANNEL, self._on_notify)
         await self._listener.add_listener(DEEP_LINKS_CHANNEL, self._on_deep_notify)
-        log.info("linkcache_listening", channels=[CHANNEL, DEEP_LINKS_CHANNEL])
+        await self._listener.add_listener(APPS_CHANNEL, self._on_app_notify)
+        log.info(
+            "linkcache_listening",
+            channels=[CHANNEL, DEEP_LINKS_CHANNEL, APPS_CHANNEL],
+        )
 
     def _on_notify(self, _conn: object, _pid: int, _channel: str, payload: str) -> None:
         """Callback from asyncpg's listener. Must not block.
@@ -203,6 +216,37 @@ class LinkCache:
         task = asyncio.create_task(self._reload_deep_links(payload), name="linkcache-reload-deep")
         self._tasks.append(task)
         task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    def _on_app_notify(self, _conn: object, _pid: int, _channel: str, payload: str) -> None:
+        """An app changed. The payload is the app id.
+
+        A link on a disabled app is inactive — the queries below have always
+        joined on app status — but nothing announced an app changing, so
+        disabling one left its links redirecting until the next full resync.
+        Disabling a single link took effect in milliseconds, which made the
+        inconsistency easy to miss: "I turned that off" was true in one case and
+        not the other.
+        """
+        self.notifications += 1
+        task = asyncio.create_task(self._reload_app_links(payload), name="linkcache-reload-app")
+        self._tasks.append(task)
+        task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    async def _reload_app_links(self, app_id: str) -> None:
+        """Replace every cached link belonging to one app.
+
+        Dropped first, then reloaded from a query that already excludes links on
+        a disabled app — so disabling the app removes them and re-enabling it
+        brings them back, without either case needing its own branch.
+        """
+        async with self._database.acquire_raw() as conn:
+            rows = await conn.fetch(LOAD_APP_LINKS_SQL, uuid.UUID(app_id))
+        remaining = {code: link for code, link in self._links.items() if str(link.app_id) != app_id}
+        for row in rows:
+            link = _to_link(row)
+            if link.active:
+                remaining[row["tracking_code"]] = link
+        self._links = remaining
 
     async def _reload_deep_links(self, app_id: str) -> None:
         """Replace one app's deep links.

@@ -22,6 +22,7 @@ from mmp_db.types import DbConn
 
 TRACKING_LINKS_CHANNEL = "tracking_links_changed"
 DEEP_LINKS_CHANNEL = "deep_links_changed"
+APPS_CHANNEL = "apps_changed"
 
 
 async def notify_tracking_link_changed(conn: DbConn, tracking_code: str) -> None:
@@ -38,3 +39,16 @@ async def notify_deep_links_changed(conn: DbConn, app_id: str) -> None:
     few of them and they are small.
     """
     await conn.execute("SELECT pg_notify($1, $2)", DEEP_LINKS_CHANNEL, app_id)
+
+
+async def notify_app_changed(conn: DbConn, app_id: str) -> None:
+    """Tell the tracker an app changed, so it reloads that app's links.
+
+    A link on a disabled app is inactive — the cache's queries have always said
+    so — but nothing announced the app changing, so disabling one left its links
+    redirecting until the next full resync. Disabling a single *link* took
+    effect in milliseconds, which made the difference easy to miss and hard to
+    explain: the promise "I turned that off" was kept in one case and not the
+    other.
+    """
+    await conn.execute("SELECT pg_notify($1, $2)", APPS_CHANNEL, app_id)

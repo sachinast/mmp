@@ -9,6 +9,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_db.notify import notify_app_changed
 from mmp_db.types import DbConn
 
 from mmp_api.deps import Principal, require_role, tenant_db
@@ -131,6 +132,7 @@ async def update_app(
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "app not found")
+    await notify_app_changed(conn, str(app_id))
     return AppOut(**dict(row))
 
 
@@ -151,4 +153,5 @@ async def disable_app(
     )
     if result == "UPDATE 0":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "app not found")
+    await notify_app_changed(conn, str(app_id))
     log.info("app_disabled", app_id=str(app_id), actor=str(principal.user_id))

@@ -244,3 +244,70 @@ async def test_a_deleted_deep_link_code_stops_resolving(seeded_app, owner_conn):
     finally:
         await cache.stop()
         await database.close()
+
+
+async def test_disabling_an_app_stops_its_links_without_a_resync(seeded_app, owner_conn):
+    """ "I turned that off" has to mean the same thing for an app as for a link.
+
+    The cache's queries have always treated a link on a disabled app as
+    inactive, but nothing announced an app changing — so disabling one left its
+    links redirecting until the next full resync, while disabling a single link
+    took effect in milliseconds.
+    """
+    from mmp_db.notify import notify_app_changed
+
+    cache, database = await _make_cache(seeded_app)
+    try:
+        code = seeded_app["tracking_code"]
+        app_id = seeded_app["app_id"]
+        assert cache.get(code) is not None
+        resyncs_before = cache.resyncs
+
+        await owner_conn.execute("UPDATE apps SET status = 'disabled' WHERE id = $1", app_id)
+        await notify_app_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.get(code) is None:
+                break
+
+        assert cache.get(code) is None, "a link on a disabled app must stop resolving"
+        assert cache.resyncs == resyncs_before, "a notification, not a full resync"
+    finally:
+        await owner_conn.execute(
+            "UPDATE apps SET status = 'active' WHERE id = $1", seeded_app["app_id"]
+        )
+        await cache.stop()
+        await database.close()
+
+
+async def test_reenabling_an_app_brings_its_links_back(seeded_app, owner_conn):
+    """The same path in reverse, with no branch of its own: the reload query
+    excludes links on a disabled app, so enabling it simply returns them."""
+    from mmp_db.notify import notify_app_changed
+
+    cache, database = await _make_cache(seeded_app)
+    try:
+        code = seeded_app["tracking_code"]
+        app_id = seeded_app["app_id"]
+
+        await owner_conn.execute("UPDATE apps SET status = 'disabled' WHERE id = $1", app_id)
+        await notify_app_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.get(code) is None:
+                break
+        assert cache.get(code) is None
+
+        await owner_conn.execute("UPDATE apps SET status = 'active' WHERE id = $1", app_id)
+        await notify_app_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.get(code) is not None:
+                break
+        assert cache.get(code) is not None, "re-enabling an app must restore its links"
+    finally:
+        await owner_conn.execute(
+            "UPDATE apps SET status = 'active' WHERE id = $1", seeded_app["app_id"]
+        )
+        await cache.stop()
+        await database.close()
