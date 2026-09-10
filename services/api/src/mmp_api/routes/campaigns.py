@@ -10,6 +10,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_db.notify import notify_tracking_link_changed
 from mmp_db.types import DbConn
 
 from mmp_api.deps import Principal, require_role, tenant_db
@@ -255,4 +256,4 @@ async def _notify_trackers(conn: DbConn, tracking_code: str) -> None:
     sent never sees it, which is why the cache also resyncs on a timer. This
     makes the common case fast, not the guarantee.
     """
-    await conn.execute("SELECT pg_notify($1, $2)", "tracking_links_changed", tracking_code)
+    await notify_tracking_link_changed(conn, tracking_code)

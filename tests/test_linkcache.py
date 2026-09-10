@@ -161,3 +161,86 @@ async def test_cache_survives_a_lost_listener(seeded_app):
     finally:
         await cache.stop()
         await database.close()
+
+
+async def test_a_new_deep_link_code_arrives_without_waiting_for_a_resync(seeded_app, owner_conn):
+    """The bug this notification exists for.
+
+    Deep links had no notification path, and `deep_link()` deliberately does not
+    fall through to the database on a miss — the right defence against someone
+    probing codes. Together that meant a freshly registered code was silently
+    ignored until the next full resync: up to five minutes of an advertiser
+    testing their own link, getting no deep link, and no error to explain it.
+    Found by registering one and clicking it.
+    """
+    from mmp_db.notify import notify_deep_links_changed
+
+    cache, database = await _make_cache(seeded_app)
+    try:
+        app_id = seeded_app["app_id"]
+        code = f"fresh{secrets.token_hex(3)}"
+        assert cache.deep_link(str(app_id), code) is None
+
+        await owner_conn.execute(
+            """INSERT INTO deep_links (id, organization_id, app_id, code, destination,
+                                       fallback_url, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, '/product/1', 'https://e.example', now(), now())""",
+            uuid7(),
+            seeded_app["organization_id"],
+            app_id,
+            code,
+        )
+        assert cache.deep_link(str(app_id), code) is None, "not announced yet"
+
+        resyncs_before = cache.resyncs
+        await notify_deep_links_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.deep_link(str(app_id), code) is not None:
+                break
+
+        target = cache.deep_link(str(app_id), code)
+        assert target is not None, "a registered code should be usable immediately"
+        assert target.destination == "/product/1"
+        assert cache.resyncs == resyncs_before, "a notification, not a full resync"
+    finally:
+        await cache.stop()
+        await database.close()
+
+
+async def test_a_deleted_deep_link_code_stops_resolving(seeded_app, owner_conn):
+    """Why the notification carries an app id rather than a code: a delete has to
+    invalidate an entry whose code it is no longer being told."""
+    from mmp_db.notify import notify_deep_links_changed
+
+    cache, database = await _make_cache(seeded_app)
+    try:
+        app_id = seeded_app["app_id"]
+        code = f"gone{secrets.token_hex(3)}"
+        deep_id = uuid7()
+        await owner_conn.execute(
+            """INSERT INTO deep_links (id, organization_id, app_id, code, destination,
+                                       fallback_url, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, '/x', 'https://e.example', now(), now())""",
+            deep_id,
+            seeded_app["organization_id"],
+            app_id,
+            code,
+        )
+        await notify_deep_links_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.deep_link(str(app_id), code) is not None:
+                break
+        assert cache.deep_link(str(app_id), code) is not None
+
+        await owner_conn.execute("DELETE FROM deep_links WHERE id = $1", deep_id)
+        await notify_deep_links_changed(owner_conn, str(app_id))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if cache.deep_link(str(app_id), code) is None:
+                break
+        assert cache.deep_link(str(app_id), code) is None, "a deleted code must stop resolving"
+    finally:
+        await cache.stop()
+        await database.close()

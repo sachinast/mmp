@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from mmp_core.deeplinks import MAX_DESTINATION, is_registered_code
 from mmp_core.ids import uuid7
+from mmp_db.notify import notify_deep_links_changed
 from mmp_db.types import DbConn
 from pydantic import BaseModel, Field
 
@@ -124,6 +125,10 @@ async def create_deep_link(
         actor_user_id=principal.user_id,
         detail={"code": body.code, "app_id": body.app_id},
     )
+    # Wake the trackers. Without this the code exists in the database and is
+    # invisible to every redirect until the next full resync — up to five
+    # minutes of an advertiser testing their own link and getting nothing.
+    await notify_deep_links_changed(conn, body.app_id)
     return DeepLinkOut(
         id=str(row["id"]),
         app_id=str(row["app_id"]),
@@ -140,8 +145,12 @@ async def delete_deep_link(
     principal: Annotated[Principal, Depends(require_role("admin"))],
     conn: Annotated[DbConn, Depends(tenant_db)],
 ) -> None:
-    deleted = await conn.fetchval("DELETE FROM deep_links WHERE id = $1 RETURNING id", deep_link_id)
-    if not deleted:
+    # app_id as well as id: the tracker is told which app's codes to reload, and
+    # a delete has to invalidate an entry whose code it is no longer being sent.
+    removed = await conn.fetchrow(
+        "DELETE FROM deep_links WHERE id = $1 RETURNING id, app_id", deep_link_id
+    )
+    if not removed:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "deep link not found")
     await audit.record(
         conn,
@@ -151,3 +160,4 @@ async def delete_deep_link(
         resource_id=str(deep_link_id),
         actor_user_id=principal.user_id,
     )
+    await notify_deep_links_changed(conn, str(removed["app_id"]))

@@ -9,9 +9,10 @@ So the whole active link set lives in a dict in each tracker process. It is
 small — a few hundred bytes per link, so a hundred thousand links is tens of
 megabytes — and it is kept fresh two ways:
 
-* **``LISTEN``/``NOTIFY``.** A trigger on ``tracking_links`` notifies on every
-  insert, update and delete. Propagation is typically milliseconds, which is
-  what makes "I disabled that link" mean something.
+* **``LISTEN``/``NOTIFY``.** The API calls ``pg_notify`` when a link or a deep
+  link changes — an application call, not a database trigger; this schema has
+  none. Propagation is typically milliseconds, which is what makes "I disabled
+  that link" mean something.
 * **A periodic full resync.** Notifications are fire-and-forget: a process that
   was disconnected when one was sent never learns about it. The resync bounds
   how long a missed notification can matter, and is the reason this design is
@@ -26,16 +27,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime as dt
+import uuid
 from dataclasses import dataclass
 
 import asyncpg
 from mmp_core.logging import get_logger
+from mmp_db.notify import DEEP_LINKS_CHANNEL, TRACKING_LINKS_CHANNEL
 from mmp_db.pool import Database
-from mmp_db.types import DbConn
 
 log = get_logger(__name__)
 
-CHANNEL = "tracking_links_changed"
+CHANNEL = TRACKING_LINKS_CHANNEL
 RESYNC_INTERVAL = dt.timedelta(minutes=5)
 # A negative entry, so a flood of requests for a code that does not exist cannot
 # be turned into a flood of database lookups. Short, because a link created a
@@ -72,6 +74,12 @@ WHERE l.status = 'active' AND a.status = 'active'
 # same reason the links are: the redirect must not query Postgres, and a code
 # that is not in this dict is simply not honoured — there is no fallback lookup,
 # so a flood of invented codes costs nothing.
+LOAD_DEEP_LINKS_FOR_APP_SQL = """
+SELECT d.app_id, d.code, d.destination, d.fallback_url
+FROM deep_links d
+WHERE d.app_id = $1
+"""
+
 LOAD_DEEP_LINKS_SQL = """
 SELECT d.app_id, d.code, d.destination, d.fallback_url
 FROM deep_links d
@@ -165,7 +173,8 @@ class LinkCache:
         """
         self._listener = await asyncpg.connect(self._database.dsn, statement_cache_size=0)
         await self._listener.add_listener(CHANNEL, self._on_notify)
-        log.info("linkcache_listening", channel=CHANNEL)
+        await self._listener.add_listener(DEEP_LINKS_CHANNEL, self._on_deep_notify)
+        log.info("linkcache_listening", channels=[CHANNEL, DEEP_LINKS_CHANNEL])
 
     def _on_notify(self, _conn: object, _pid: int, _channel: str, payload: str) -> None:
         """Callback from asyncpg's listener. Must not block.
@@ -178,6 +187,39 @@ class LinkCache:
         task = asyncio.create_task(self._reload_one(payload), name="linkcache-reload")
         self._tasks.append(task)
         task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    def _on_deep_notify(self, _conn: object, _pid: int, _channel: str, payload: str) -> None:
+        """An app's deep links changed. The payload is the app id.
+
+        Deep links had no notification at all before this, so a freshly
+        registered code did nothing until the next full resync — up to five
+        minutes of an advertiser testing their own link, getting no deep link,
+        and no error to explain it. `deep_link()` deliberately does not fall
+        through to the database on a miss, which is the right defence against
+        someone probing codes, but it leaves this as the only way a new code
+        arrives promptly.
+        """
+        self.notifications += 1
+        task = asyncio.create_task(self._reload_deep_links(payload), name="linkcache-reload-deep")
+        self._tasks.append(task)
+        task.add_done_callback(lambda t: self._tasks.remove(t) if t in self._tasks else None)
+
+    async def _reload_deep_links(self, app_id: str) -> None:
+        """Replace one app's deep links.
+
+        Every code for the app is dropped first, so a delete takes effect: the
+        notification carries the app, not the code that went away.
+        """
+        async with self._database.acquire_raw() as conn:
+            rows = await conn.fetch(LOAD_DEEP_LINKS_FOR_APP_SQL, uuid.UUID(app_id))
+        remaining = {key: value for key, value in self._deep.items() if key[0] != app_id}
+        for row in rows:
+            remaining[(str(row["app_id"]), row["code"])] = DeepLinkTarget(
+                destination=row["destination"], fallback_url=row["fallback_url"]
+            )
+        # Swapped in one assignment, like resync(): a redirect must never see a
+        # half-rebuilt map.
+        self._deep = remaining
 
     async def _resync_loop(self) -> None:
         while not self._stopping:
@@ -287,8 +329,3 @@ class LinkCache:
     @property
     def deep_link_count(self) -> int:
         return len(self._deep)
-
-
-async def notify_changed(conn: DbConn, tracking_code: str) -> None:
-    """Publish a change so every tracker process reloads that link."""
-    await conn.execute("SELECT pg_notify($1, $2)", CHANNEL, tracking_code)

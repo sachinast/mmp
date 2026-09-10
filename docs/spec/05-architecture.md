@@ -62,7 +62,12 @@ CSRF, RBAC, and long-running exports.
 The link cache is the whole active link set in process memory, kept fresh by
 `LISTEN`/`NOTIFY` plus a five-minute full resync. Notifications are
 fire-and-forget, so the resync is what makes the design safe rather than merely
-fast. A miss falls through to one indexed lookup and populates the cache.
+fast. A tracking-code miss falls through to one indexed lookup and populates the
+cache; a **deep link** code miss deliberately does not, because a missing code
+is more likely someone probing than a real link, and honouring it would let an
+attacker choose how often we query. That makes the notification the only prompt
+path for a new code — which is why deep link changes notify too, and why they
+had to start doing so.
 
 `Cache-Control: no-store` on the redirect matters more than it looks: without
 it, an intermediary can cache the 302 and every click through that proxy reuses
