@@ -86,15 +86,18 @@ async def _webhook_row(owner_conn, seeded_app, context, url: str, events: list[s
     webhook_id = uuid7()
     await owner_conn.execute(
         """INSERT INTO webhooks (id, organization_id, url, secret_ciphertext,
-                                 secret_nonce, wrapped_dek, events, enabled,
-                                 consecutive_failures, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, true, 0, now(), now())""",
+                                 secret_nonce, wrapped_dek, key_version, events,
+                                 enabled, consecutive_failures, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, true, 0, now(), now())""",
         webhook_id,
         seeded_app["organization_id"],
         url,
         sealed.ciphertext,
         sealed.nonce,
         sealed.wrapped_dek,
+        # Stored, not assumed. Whichever master key sealed this is the only one
+        # that can open it again.
+        sealed.key_version,
         json.dumps(events),
     )
     return webhook_id, secret
@@ -343,3 +346,84 @@ async def test_repeated_failures_disable_the_webhook(
     )
     assert delivery["status"] == "failed"
     assert delivery["response_status"] == 500
+
+
+async def test_a_webhook_sealed_after_a_key_rotation_is_still_signed(
+    tracker, ingest_redis, owner_conn, seeded_app, receiver, monkeypatch
+):
+    """The bug the key_version column exists for.
+
+    `seal()` wraps a data key with whichever master key is current and reports
+    that version. The webhook path used to drop it and both readers assumed 1,
+    so a webhook created after a rotation had its data key wrapped under the new
+    master key and unwrapped under the old one. AES-GCM answers that with
+    InvalidTag, the sender abandons the delivery rather than send it unsigned —
+    correct, and for a reason nothing explained — and every conversion for that
+    endpoint silently stops arriving.
+
+    Nothing in this repository could reach version 2 before: the local provider
+    is built with a single key. So this builds a rotated one, which is what
+    makes the assumption visible.
+    """
+    import hmac
+    import os
+    from hashlib import sha256
+
+    from mmp_crypto.envelope import LocalMasterKeyProvider
+
+    from mmp_core import outbound
+
+    monkeypatch.setattr(outbound, "BLOCKED_NETWORKS", ())
+    monkeypatch.setattr(
+        outbound,
+        "validate_destination",
+        lambda url, allow_http=False: outbound.ResolvedTarget(
+            url=url, hostname="127.0.0.1", address="127.0.0.1", port=8977
+        ),
+    )
+
+    rotated = LocalMasterKeyProvider({1: os.urandom(32), 2: os.urandom(32)}, current_version=2)
+    _webhook_id, secret = await _webhook_row(
+        owner_conn, seeded_app, rotated, receiver.url, ["purchase"]
+    )
+
+    await tracker.post(
+        "/v1/events",
+        json={
+            "events": [
+                sample_event(
+                    event_name="purchase",
+                    anonymous_id="device-rotated",
+                    revenue_minor=1234,
+                    currency="USD",
+                )
+            ]
+        },
+    )
+    await flush_tracker(tracker)
+
+    from mmp_db.pool import Database
+
+    database = await Database.connect(seeded_app["worker_settings"], role="mmp_worker")
+    try:
+        consumer = await _consumer(seeded_app, ingest_redis, database)
+        # The sender must open the secret with the key that sealed it, so give
+        # it the rotated provider rather than the single-version default.
+        consumer._master_keys = rotated
+        for _ in range(4):
+            if await consumer.run_once() == 0:
+                break
+    finally:
+        await database.close()
+
+    assert receiver.received, (
+        "a webhook sealed under a rotated key must still be deliverable; an "
+        "abandoned delivery here means the version was assumed rather than read"
+    )
+    delivery = receiver.received[-1]
+    timestamp = delivery["headers"]["x-mmp-timestamp"]
+    canonical = "\n".join(
+        ["v1", "POST", "/hooks/mmp", timestamp, sha256(delivery["raw"]).hexdigest()]
+    ).encode()
+    expected = hmac.new(secret.encode(), canonical, sha256).hexdigest()
+    assert hmac.compare_digest(expected, delivery["headers"]["x-mmp-signature"].removeprefix("v1="))

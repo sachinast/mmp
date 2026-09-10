@@ -189,3 +189,58 @@ def test_auto_disable_threshold():
 
     assert not should_disable(MAX_CONSECUTIVE_FAILURES - 1)
     assert should_disable(MAX_CONSECUTIVE_FAILURES)
+
+
+async def test_a_webhook_created_after_a_rotation_records_the_new_key_version(
+    account, api_client, owner_conn
+):
+    """The seal side of the same bug.
+
+    `seal()` reports which master key wrapped the data key. The create path used
+    to discard it, so a webhook sealed under a rotated key was recorded as
+    version 1 and could never be opened again — the sender abandons the
+    delivery rather than send it unsigned, and the endpoint silently stops
+    receiving anything.
+
+    Nothing else in the suite can reach version 2: the local provider is built
+    with a single key, which is exactly why the assumption went unnoticed.
+    """
+    import os
+    import uuid as _uuid
+
+    from mmp_crypto.envelope import (
+        LocalMasterKeyProvider,
+        SealedSecret,
+        open_sealed,
+        organization_aad,
+    )
+
+    app = api_client._transport.app  # type: ignore[attr-defined]
+    rotated = LocalMasterKeyProvider({1: os.urandom(32), 2: os.urandom(32)}, current_version=2)
+    app.state.context.master_keys = rotated
+
+    created = await _webhook(account)
+    assert created.status_code == 201, created.text
+    secret = created.json()["signing_secret"]
+
+    row = await owner_conn.fetchrow(
+        "SELECT secret_ciphertext, secret_nonce, wrapped_dek, key_version"
+        " FROM webhooks WHERE id = $1",
+        _uuid.UUID(created.json()["id"]),
+    )
+    assert row["key_version"] == 2, (
+        "the stored version must be the one that sealed it, not a default"
+    )
+
+    # And it opens, which is the thing the sender needs to be able to do.
+    opened = open_sealed(
+        SealedSecret(
+            ciphertext=bytes(row["secret_ciphertext"]),
+            nonce=bytes(row["secret_nonce"]),
+            wrapped_dek=bytes(row["wrapped_dek"]),
+            key_version=int(row["key_version"]),
+        ),
+        provider=rotated,
+        aad=organization_aad(_uuid.UUID(account.organization["id"])),
+    ).decode()
+    assert opened == secret

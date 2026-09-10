@@ -373,3 +373,16 @@ marketing.
 Security issues should go to the platform team directly rather than through a
 public issue. This section needs a real address before the platform is exposed to
 anyone outside the company.
+
+### Key rotation
+
+Every table holding a wrapped data key records the master key version that
+wrapped it — `provider_integrations`, `webhooks` and `postback_rules`. Without
+it, a secret sealed after a rotation is unwrapped under the old key, which
+AES-GCM answers with `InvalidTag` rather than anything diagnosable: webhook
+deliveries are abandoned (correctly, since an unsigned delivery is one the
+receiver has no reason to trust) and a rule's headers silently list as empty.
+
+`webhooks` and `postback_rules` did not carry it until a structural test
+compared every table with a `wrapped_dek` against the ones recording a version.
+

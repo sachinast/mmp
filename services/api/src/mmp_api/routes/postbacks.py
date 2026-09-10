@@ -233,9 +233,15 @@ def _validate_destination(url_template: str, *, is_sandbox: bool) -> None:
 
 def _seal_headers(
     context: AppContext, organization_id: uuid.UUID, headers: dict[str, str] | None
-) -> tuple[bytes | None, bytes | None, bytes | None]:
+) -> tuple[bytes | None, bytes | None, bytes | None, int]:
+    """Seal a rule's custom headers, keeping the key version they were sealed
+    under.
+
+    A rule with no headers still gets a version: the column is NOT NULL, and 1
+    is what an unsealed row would have meant anyway.
+    """
     if not headers:
-        return None, None, None
+        return None, None, None, 1
     import msgspec
 
     sealed = seal(
@@ -243,7 +249,7 @@ def _seal_headers(
         provider=context.master_keys,
         aad=organization_aad(organization_id),
     )
-    return sealed.ciphertext, sealed.nonce, sealed.wrapped_dek
+    return sealed.ciphertext, sealed.nonce, sealed.wrapped_dek, sealed.key_version
 
 
 def _header_names(
@@ -264,7 +270,7 @@ def _header_names(
                 ciphertext=bytes(row["headers_ciphertext"]),
                 nonce=bytes(row["headers_nonce"]),
                 wrapped_dek=bytes(row["wrapped_dek"]),
-                key_version=1,
+                key_version=int(row["key_version"]),
             ),
             provider=context.master_keys,
             aad=organization_aad(organization_id),
@@ -283,7 +289,7 @@ async def list_rules(
     conn: Annotated[DbConn, Depends(tenant_db)],
     app_id: uuid.UUID | None = None,
 ) -> list[PostbackRuleOut]:
-    columns = (*RULE_COLUMNS, "headers_ciphertext", "headers_nonce", "wrapped_dek")
+    columns = (*RULE_COLUMNS, "headers_ciphertext", "headers_nonce", "wrapped_dek", "key_version")
     if app_id is not None:
         rows = await conn.fetch(
             sql.select(
@@ -317,17 +323,17 @@ async def create_rule(
     _validate_templates(body.url_template, body.body_template)
     _validate_destination(body.url_template, is_sandbox=body.is_sandbox)
 
-    ciphertext, nonce, wrapped = _seal_headers(context, principal.org_id, body.headers)
+    ciphertext, nonce, wrapped, key_version = _seal_headers(context, principal.org_id, body.headers)
     rule_id = uuid7()
     row = await conn.fetchrow(
         sql.with_returning(
             """INSERT INTO postback_rules (
                    id, organization_id, app_id, name, trigger_event, method,
                    url_template, body_template, headers_ciphertext, headers_nonce,
-                   wrapped_dek, success_status_codes, requires_attribution,
+                   wrapped_dek, key_version, success_status_codes, requires_attribution,
                    is_sandbox, enabled, created_at, updated_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                       $13, $14, true, now(), now())""",
+                       $13, $14, $15, true, now(), now())""",
             RULE_COLUMNS,
         ),
         rule_id,
@@ -341,6 +347,7 @@ async def create_rule(
         ciphertext,
         nonce,
         wrapped,
+        key_version,
         # asyncpg takes jsonb as a string, and hands it back as one.
         json.dumps(body.success_status_codes),
         body.requires_attribution,
@@ -393,7 +400,13 @@ async def update_rule(
             "postback_rules",
             list(changes),
             where="id = $1",
-            returning=(*RULE_COLUMNS, "headers_ciphertext", "headers_nonce", "wrapped_dek"),
+            returning=(
+                *RULE_COLUMNS,
+                "headers_ciphertext",
+                "headers_nonce",
+                "wrapped_dek",
+                "key_version",
+            ),
         ),
         rule_id,
         *changes.values(),

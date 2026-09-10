@@ -44,7 +44,7 @@ WEBHOOK_GROUP = "webhook-sender"
 SUCCESS_CODES = frozenset({200, 201, 202, 204})
 
 SUBSCRIBERS_SQL = """
-SELECT id, organization_id, url, secret_ciphertext, secret_nonce, wrapped_dek,
+SELECT id, organization_id, url, secret_ciphertext, secret_nonce, wrapped_dek, key_version,
        consecutive_failures
 FROM webhooks
 WHERE organization_id = $1 AND enabled AND events ? $2
@@ -223,7 +223,10 @@ class WebhookConsumer:
                     ciphertext=bytes(webhook["secret_ciphertext"]),  # type: ignore[index]
                     nonce=bytes(webhook["secret_nonce"]),  # type: ignore[index]
                     wrapped_dek=bytes(webhook["wrapped_dek"]),  # type: ignore[index]
-                    key_version=1,
+                    # From the row, not a constant. A secret sealed after a
+                    # master key rotation is wrapped under the new key, and
+                    # unwrapping it under the old one fails outright.
+                    key_version=int(webhook["key_version"]),  # type: ignore[index]
                 ),
                 provider=self._master_keys,
                 aad=organization_aad(organization_id),

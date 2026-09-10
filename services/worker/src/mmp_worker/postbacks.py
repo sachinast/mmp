@@ -43,6 +43,10 @@ RULES_SQL = """
 SELECT r.id, r.method, r.url_template, r.body_template, r.success_status_codes,
        r.requires_attribution, r.is_sandbox, r.organization_id,
        i.provider, i.credentials_ciphertext, i.credentials_nonce, i.wrapped_dek,
+       -- Aliased: postback_rules carries a key_version of its own now, and two
+       -- columns of the same name in one row is a bug waiting for whichever
+       -- one the driver happens to keep.
+       i.key_version AS integration_key_version,
        i.configuration
 FROM postback_rules r
 LEFT JOIN provider_integrations i ON i.id = r.provider_integration_id
@@ -257,7 +261,7 @@ class PostbackConsumer:
                     ciphertext=bytes(rule["credentials_ciphertext"]),
                     nonce=bytes(rule["credentials_nonce"]),
                     wrapped_dek=bytes(rule["wrapped_dek"]),
-                    key_version=1,
+                    key_version=int(rule["integration_key_version"]),
                 ),
                 provider=self._master_keys,
                 aad=organization_aad(rule["organization_id"]),

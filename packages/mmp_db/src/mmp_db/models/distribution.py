@@ -92,6 +92,9 @@ class PostbackRule(Base, OrgScopedMixin, TimestampMixin):
     headers_ciphertext: Mapped[bytes | None] = mapped_column(BYTEA)
     headers_nonce: Mapped[bytes | None] = mapped_column(BYTEA)
     wrapped_dek: Mapped[bytes | None] = mapped_column(BYTEA)
+    # As on webhooks: which master key wrapped the data key. Without it a
+    # header set sealed after a rotation cannot be opened at all.
+    key_version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
 
     success_status_codes: Mapped[list[int]] = mapped_column(
         JSONB, nullable=False, default=lambda: [200, 201, 202, 204]
@@ -202,6 +205,9 @@ class Webhook(Base, OrgScopedMixin, TimestampMixin):
     secret_ciphertext: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     secret_nonce: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     wrapped_dek: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
+    # Which master key wrapped the data key. Without it a secret sealed after a
+    # rotation is read back under the old key and cannot be opened at all.
+    key_version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     events: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     consecutive_failures: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)

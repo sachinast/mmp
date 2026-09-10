@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
 from mmp_core.outbound import is_permitted
-from mmp_crypto.envelope import SealedSecret, open_sealed, organization_aad, seal
+from mmp_crypto.envelope import organization_aad, seal
 from mmp_db.jsonfields import decode
 from mmp_db.types import DbConn
 from mmp_providers.webhooks import (
@@ -173,31 +173,21 @@ def _check_destination(url: str) -> None:
 
 def _seal_secret(
     context: AppContext, organization_id: uuid.UUID, secret: str
-) -> tuple[bytes, bytes, bytes]:
+) -> tuple[bytes, bytes, bytes, int]:
+    """Seal a signing secret, keeping the key version it was sealed under.
+
+    The version used to be dropped here, and both readers assumed 1. A webhook
+    created after a master key rotation therefore had its data key wrapped under
+    the new key and unwrapped under the old one — AES-GCM answers that with
+    InvalidTag, the sender abandons the delivery rather than send it unsigned,
+    and every conversion for that endpoint silently stops arriving.
+    """
     sealed = seal(
         secret.encode("utf-8"),
         provider=context.master_keys,
         aad=organization_aad(organization_id),
     )
-    return sealed.ciphertext, sealed.nonce, sealed.wrapped_dek
-
-
-def open_webhook_secret(context: AppContext, organization_id: uuid.UUID, row: object) -> str:
-    """Recover a signing secret in order to sign a delivery.
-
-    The only reason this function exists. It is not reachable from any endpoint
-    that returns data to a user.
-    """
-    return open_sealed(
-        SealedSecret(
-            ciphertext=bytes(row["secret_ciphertext"]),  # type: ignore[index]
-            nonce=bytes(row["secret_nonce"]),  # type: ignore[index]
-            wrapped_dek=bytes(row["wrapped_dek"]),  # type: ignore[index]
-            key_version=1,
-        ),
-        provider=context.master_keys,
-        aad=organization_aad(organization_id),
-    ).decode("utf-8")
+    return sealed.ciphertext, sealed.nonce, sealed.wrapped_dek, sealed.key_version
 
 
 @router.get("")
@@ -222,15 +212,15 @@ async def create_webhook(
     _check_destination(url)
 
     secret = SECRET_PREFIX + secrets.token_urlsafe(32)
-    ciphertext, nonce, wrapped = _seal_secret(context, principal.org_id, secret)
+    ciphertext, nonce, wrapped, key_version = _seal_secret(context, principal.org_id, secret)
     webhook_id = uuid7()
 
     row = await conn.fetchrow(
         sql.with_returning(
             """INSERT INTO webhooks (id, organization_id, url, secret_ciphertext,
-                                     secret_nonce, wrapped_dek, events, enabled,
-                                     consecutive_failures, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, true, 0, now(), now())""",
+                                     secret_nonce, wrapped_dek, key_version, events,
+                                     enabled, consecutive_failures, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 0, now(), now())""",
             WEBHOOK_COLUMNS,
         ),
         webhook_id,
@@ -239,6 +229,7 @@ async def create_webhook(
         ciphertext,
         nonce,
         wrapped,
+        key_version,
         json.dumps(body.events),
     )
 
@@ -272,13 +263,13 @@ async def rotate_secret(
     leaked one still works, and rotation is rare enough to coordinate.
     """
     secret = SECRET_PREFIX + secrets.token_urlsafe(32)
-    ciphertext, nonce, wrapped = _seal_secret(context, principal.org_id, secret)
+    ciphertext, nonce, wrapped, key_version = _seal_secret(context, principal.org_id, secret)
 
     row = await conn.fetchrow(
         sql.with_returning(
             """UPDATE webhooks
                SET secret_ciphertext = $2, secret_nonce = $3, wrapped_dek = $4,
-                   updated_at = now()
+                   key_version = $5, updated_at = now()
                WHERE id = $1""",
             WEBHOOK_COLUMNS,
         ),
@@ -286,6 +277,7 @@ async def rotate_secret(
         ciphertext,
         nonce,
         wrapped,
+        key_version,
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "webhook not found")

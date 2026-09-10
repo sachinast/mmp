@@ -10,6 +10,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 from mmp_crypto.envelope import (
     LocalMasterKeyProvider,
+    SealedSecret,
     open_sealed,
     organization_aad,
     rewrap,
@@ -201,3 +202,58 @@ def test_device_id_is_case_insensitive():
 def test_geo_truncation_drops_host_precision():
     assert truncate_ip_for_geo("203.0.113.99") == "203.0.113.0"
     assert truncate_ip_for_geo("2001:db8:1234:5678::1") == "2001:db8:1234::"
+
+
+def test_a_secret_sealed_after_rotation_cannot_be_opened_as_version_one():
+    """Why every sealed-secret table has to carry its key version.
+
+    `seal()` wraps the data key with whichever master key is current and returns
+    that version. Discarding it and assuming 1 works right up until someone
+    rotates: the data key is then wrapped under the new master key and unwrapped
+    under the old one, and AES-GCM answers that with InvalidTag rather than
+    anything diagnosable.
+
+    This is what the webhooks table was doing. The failure surfaced as deliveries
+    abandoned with "signing secret could not be decrypted" — the sender refusing
+    to send unsigned, which is right, for a reason nothing explained.
+    """
+    from cryptography.exceptions import InvalidTag
+
+    old_key, new_key = os.urandom(32), os.urandom(32)
+    after_rotation = LocalMasterKeyProvider({1: old_key, 2: new_key}, current_version=2)
+    aad = organization_aad("org-a")
+
+    sealed = seal(b"whsec_example", provider=after_rotation, aad=aad)
+    assert sealed.key_version == 2, "sealed under the key that is current now"
+
+    assuming_version_one = SealedSecret(
+        ciphertext=sealed.ciphertext,
+        nonce=sealed.nonce,
+        wrapped_dek=sealed.wrapped_dek,
+        key_version=1,
+    )
+    with pytest.raises(InvalidTag):
+        open_sealed(assuming_version_one, provider=after_rotation, aad=aad)
+
+    assert open_sealed(sealed, provider=after_rotation, aad=aad) == b"whsec_example"
+
+
+def test_every_table_holding_a_sealed_secret_records_its_key_version():
+    """A structural guard, because this was found by reading rather than by
+    failing: `provider_integrations` carried a key_version and `webhooks` did
+    not, and nothing compared them."""
+    from mmp_db.models import distribution, governance
+
+    sealed_columns = ("wrapped_dek",)
+    for module in (distribution, governance):
+        for name in dir(module):
+            model = getattr(module, name)
+            table = getattr(model, "__table__", None)
+            if table is None:
+                continue
+            if not any(column in table.columns for column in sealed_columns):
+                continue
+            assert "key_version" in table.columns, (
+                f"{table.name} stores a wrapped data key but not the master key "
+                f"version that wrapped it — it cannot survive a rotation"
+            )

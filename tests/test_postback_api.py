@@ -253,3 +253,33 @@ def test_json_decoding_is_idempotent_and_typed():
     assert decode_list(None) == []
     with _pytest.raises(TypeError):
         decode_list('{"not": "a list"}')
+
+
+async def test_rule_headers_sealed_after_a_rotation_can_still_be_listed(account, api_client):
+    """The same key-version bug as webhooks, in the other table that seals.
+
+    A rule's headers commonly carry a partner's bearer token. Sealed under a
+    rotated master key and read back as version 1, they cannot be opened —
+    and `_header_names` answers an unopenable header set with an empty list, so
+    the failure shows up as headers quietly vanishing from the UI rather than as
+    an error.
+    """
+    import os
+
+    from mmp_crypto.envelope import LocalMasterKeyProvider
+
+    app_context = api_client._transport.app  # type: ignore[attr-defined]
+    rotated = LocalMasterKeyProvider({1: os.urandom(32), 2: os.urandom(32)}, current_version=2)
+    app_context.state.context.master_keys = rotated
+
+    app = await _app(account)
+    created = await _rule(account, app, headers={"Authorization": "Bearer partner-token"})
+    assert created.status_code == 201, created.text
+
+    assert created.json()["header_names"] == ["Authorization"], (
+        "headers sealed under a rotated key must still be listable"
+    )
+    assert "partner-token" not in created.text
+
+    listing = await account.client.get("/v1/postback-rules")
+    assert listing.json()[0]["header_names"] == ["Authorization"]
