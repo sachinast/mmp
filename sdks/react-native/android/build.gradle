@@ -28,6 +28,18 @@ android {
     lint {
         warningsAsErrors true
         abortOnError true
+
+        // Two checks that report on the outside world rather than on this
+        // module: "a newer com.android.library exists", "a newer
+        // play-services-ads-identifier exists". Neither describes a defect
+        // here, and with warningsAsErrors both fail a build that nobody
+        // touched, on a schedule set by other people's releases. A green build
+        // that turns red overnight without a commit trains everyone to ignore
+        // it, which costs more than the staleness they were warning about.
+        //
+        // Upgrades stay deliberate: bump a version because something needs it,
+        // having read what changed, not because a linter noticed a release.
+        disable += ["GradleDependency", "AndroidGradlePluginVersion"]
     }
 }
 
