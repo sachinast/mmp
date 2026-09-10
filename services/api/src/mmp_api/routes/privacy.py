@@ -16,6 +16,7 @@ from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
 from mmp_db.erasure import erase_device
 from mmp_db.types import DbConn
+from mmp_ingest.consent import consent_cache_key
 from pydantic import BaseModel, Field
 
 from mmp_api.context import AppContext
@@ -158,7 +159,7 @@ async def record_consent(
     # The tracker caches consent for five minutes. A withdrawal recorded here
     # must take effect now, not when that expires — which is exactly the delay a
     # person exercising their rights does not expect.
-    await context.redis.delete(f"consent:{body.app_id}:{body.anonymous_id}")
+    await context.redis.delete(consent_cache_key(str(body.app_id), body.anonymous_id))
 
     await audit.record(
         conn,
@@ -234,7 +235,7 @@ async def request_erasure(
         },
     )
 
-    await context.redis.delete(f"consent:{body.app_id}:{body.anonymous_id}")
+    await context.redis.delete(consent_cache_key(str(body.app_id), body.anonymous_id))
     await context.redis.delete(f"attr:{body.app_id}:{body.anonymous_id}")
 
     log.info("erasure_served", **result.as_dict(), actor=str(principal.user_id))

@@ -46,6 +46,22 @@ from redis.asyncio import Redis
 log = get_logger(__name__)
 
 CACHE_PREFIX = "consent:"
+
+
+def consent_cache_key(app_id: str, anonymous_id: str) -> str:
+    """The cache key for one device's consent, in one place.
+
+    Public because the API invalidates this cache too — a decision recorded
+    through `/v1/privacy/consent` has to reach the tracker, not wait five
+    minutes for a TTL. That path used to build the key from its own copy of the
+    format, in two spots, and the test asserting the invalidation built a third.
+    All three agreed, so nothing was broken; nothing would have noticed if a
+    rename made them disagree, and the symptom would have been a withdrawal of
+    consent quietly not taking effect.
+    """
+    return f"{CACHE_PREFIX}{app_id}:{anonymous_id}"
+
+
 # Short. A user who withdraws consent expects it to take effect now, not after a
 # cache expires, and this is read on the ingest path where a database lookup per
 # event is not affordable.
@@ -153,7 +169,7 @@ class ConsentGate:
 
     @staticmethod
     def _key(app_id: str, anonymous_id: str) -> str:
-        return f"{CACHE_PREFIX}{app_id}:{anonymous_id}"
+        return consent_cache_key(app_id, anonymous_id)
 
     async def lookup(
         self, app_id: str, anonymous_id: str, *, mode: Mode = Mode.PERMISSIVE

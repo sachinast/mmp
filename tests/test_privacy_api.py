@@ -63,7 +63,13 @@ async def test_a_withdrawal_clears_the_tracker_cache(account, api_client):
 
     app = await _app(account, package="com.example.cache")
     redis = Redis.from_url(TEST_REDIS_URL, decode_responses=False)
-    cache_key = f"consent:{app['id']}:dev-3"
+    # Derived from the same helper the API and the tracker use, not a third
+    # copy of the format. Asserting against a literal made this test agree with
+    # itself: a rename could have stopped the invalidation matching the cache
+    # and nothing here would have failed.
+    from mmp_ingest.consent import consent_cache_key
+
+    cache_key = consent_cache_key(app["id"], "dev-3")
     await redis.set(cache_key, b"stale")
 
     await account.post(
