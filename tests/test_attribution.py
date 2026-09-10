@@ -741,3 +741,84 @@ def test_folding_matches_only_whole_names() -> None:
     assert canonical_event_name("Checkout Started") == "checkoutstarted"
     # A name that merely contains a reserved word is its own event.
     assert canonical_event_name("signup_abandoned") != "signup"
+
+
+def _record_logs(monkeypatch):
+    """Substitute the store's logger and record (event, reason) pairs.
+
+    Asserting on the logger directly rather than through structlog's capture:
+    the module binds its logger at import, so reconfiguring structlog afterwards
+    does not reach it — and what these tests care about is that the branch
+    reports a reason at all, not how it is rendered.
+    """
+    import mmp_attrib.store as store
+
+    recorded: list[tuple[str, str]] = []
+
+    class _Recorder:
+        def info(self, event: str, **fields: object) -> None:
+            recorded.append((event, str(fields.get("reason", ""))))
+
+    monkeypatch.setattr(store, "log", _Recorder())
+    return recorded
+
+
+# --- the identity alias, and its silent branches -------------------------
+async def test_link_user_mirrors_the_entry_with_the_same_expiry(ingest_redis):
+    """The alias must not outlive the attribution it mirrors, or a conversion
+    arriving after the window closed would still credit a campaign."""
+    import uuid as _uuid
+
+    from mmp_attrib.store import _cache_key, link_user
+
+    app_id = _uuid.uuid4()
+    await ingest_redis.set(_cache_key(app_id, "dev-1"), b"payload", ex=3600)
+
+    await link_user(ingest_redis, app_id=app_id, anonymous_id="dev-1", user_id="u-1")
+
+    alias = _cache_key(app_id, "user:u-1")
+    assert await ingest_redis.get(alias) == b"payload"
+    ttl = await ingest_redis.ttl(alias)
+    assert 0 < ttl <= 3600
+
+
+async def test_link_user_says_so_when_there_is_nothing_to_mirror(ingest_redis, monkeypatch):
+    """A device with no cached attribution links nothing — ordinary, and it used
+    to happen in complete silence.
+
+    That silence cost a day of debugging: the alias was being created correctly
+    the whole time and I was reading the wrong key, with no log on either side
+    to contradict me. A branch that decides a conversion will go unattributed
+    should say so.
+    """
+    import uuid as _uuid
+
+    from mmp_attrib.store import _cache_key, link_user
+
+    app_id = _uuid.uuid4()
+    entries = _record_logs(monkeypatch)
+    await link_user(ingest_redis, app_id=app_id, anonymous_id="absent", user_id="u-2")
+
+    assert not await ingest_redis.exists(_cache_key(app_id, "user:u-2"))
+    assert entries == [("identity_link_skipped", "no_cached_attribution")], entries
+
+
+async def test_link_user_refuses_to_mirror_an_entry_with_no_expiry(ingest_redis, monkeypatch):
+    """`ttl()` answers -1 for a key with no expiry.
+
+    `cache()` always writes one, so this should be unreachable — but mirroring
+    such an entry would create an alias that never expires, and an immortal
+    attribution is worse than a missing one. It skips, and now says why.
+    """
+    import uuid as _uuid
+
+    from mmp_attrib.store import _cache_key, link_user
+
+    app_id = _uuid.uuid4()
+    await ingest_redis.set(_cache_key(app_id, "dev-3"), b"payload")  # deliberately no ex=
+
+    entries = _record_logs(monkeypatch)
+    await link_user(ingest_redis, app_id=app_id, anonymous_id="dev-3", user_id="u-3")
+
+    assert not await ingest_redis.exists(_cache_key(app_id, "user:u-3"))
+    assert entries == [("identity_link_skipped", "source_has_no_expiry")], entries

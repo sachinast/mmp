@@ -279,9 +279,33 @@ async def link_user(
     from a server-to-server call that never sees the device. Without this alias
     those conversions would resolve to nothing and be reported organic.
     """
-    payload = await redis.get(_cache_key(app_id, anonymous_id))
+    source = _cache_key(app_id, anonymous_id)
+    payload = await redis.get(source)
     if payload is None:
+        # The device has no cached attribution: either the install has not been
+        # attributed yet, or its window has closed. Both are ordinary, and both
+        # mean a later server-to-server conversion for this user resolves to
+        # nothing — so they are worth seeing rather than returning in silence.
+        log.info(
+            "identity_link_skipped",
+            reason="no_cached_attribution",
+            app_id=str(app_id),
+            user_id=user_id,
+        )
         return
-    ttl = await redis.ttl(_cache_key(app_id, anonymous_id))
-    if ttl and ttl > 0:
-        await redis.set(_cache_key(app_id, f"user:{user_id}"), payload, ex=ttl)
+
+    ttl = await redis.ttl(source)
+    if ttl is None or ttl <= 0:
+        # ttl() answers -1 for a key with no expiry and -2 for one that has
+        # gone between the read above and here.
+        log.info(
+            "identity_link_skipped",
+            reason="source_has_no_expiry" if ttl == -1 else "source_vanished",
+            app_id=str(app_id),
+            user_id=user_id,
+            ttl=ttl,
+        )
+        return
+
+    await redis.set(_cache_key(app_id, f"user:{user_id}"), payload, ex=ttl)
+    log.info("identity_linked", app_id=str(app_id), user_id=user_id, ttl=ttl)
