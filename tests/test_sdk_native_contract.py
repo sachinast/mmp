@@ -82,11 +82,19 @@ def test_android_does_not_force_play_services_onto_the_host_app() -> None:
     someone else's release and break their build. The classes are reached
     through a try/catch that already handles their absence."""
     gradle = (SDK / "android" / "build.gradle").read_text()
+    # Comments stripped first. This matched any line containing the name, so a
+    # comment that merely mentioned the library failed the build — and it
+    # checked only the first match, which would have missed a second
+    # declaration entirely. CI caught it; the local run before that commit was
+    # mine to skip.
+    code = [line for line in gradle.splitlines() if not line.strip().startswith(("//", "*", "/*"))]
     for library in ("play-services-ads-identifier", "installreferrer"):
-        line = next(line for line in gradle.splitlines() if library in line)
-        assert line.strip().startswith("compileOnly"), (
-            f"{library} must be compileOnly, not a forced dependency"
-        )
+        declarations = [line.strip() for line in code if library in line]
+        assert declarations, f"{library} is not declared at all"
+        for declaration in declarations:
+            assert declaration.startswith("compileOnly"), (
+                f"{library} must be compileOnly, not a forced dependency: {declaration!r}"
+            )
 
 
 def test_android_declares_the_ad_id_permission() -> None:
