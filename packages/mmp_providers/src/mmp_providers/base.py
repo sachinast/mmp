@@ -185,11 +185,6 @@ class Provider(Protocol):
         ...
 
 
-def maps_event(provider: Provider, event_name: str) -> str | None:
-    """The provider's name for one of our events, if it accepts it at all."""
-    return provider.event_map.get(event_name)
-
-
 def missing_credentials(config: ProviderConfig, required: tuple[str, ...]) -> list[str]:
     """Shared validation helper.
 

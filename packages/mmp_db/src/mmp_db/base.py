@@ -7,7 +7,7 @@ import uuid
 from typing import Any, ClassVar
 
 from mmp_core.ids import uuid7
-from sqlalchemy import DateTime, ForeignKey, MetaData, String, func
+from sqlalchemy import DateTime, ForeignKey, MetaData, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -71,10 +71,6 @@ def org_fk() -> Mapped[uuid.UUID]:
         nullable=False,
         index=True,
     )
-
-
-def short_text(length: int = 255, **kwargs: Any) -> Mapped[str]:
-    return mapped_column(String(length), **kwargs)
 
 
 # Enumerated values are stored as text with a CHECK constraint rather than as a

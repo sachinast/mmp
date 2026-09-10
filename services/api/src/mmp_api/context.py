@@ -7,7 +7,6 @@ imports.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from mmp_core.ratelimit import RateLimiter
@@ -60,7 +59,3 @@ def _master_key_provider(settings: Settings) -> MasterKeyProvider:
     provider_from_settings for why that matters.
     """
     return provider_from_settings(settings)
-
-
-def redis_url_for_tests() -> str:
-    return os.environ.get("MMP_REDIS_URL", "redis://127.0.0.1:6379/1")
