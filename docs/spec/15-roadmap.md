@@ -23,7 +23,7 @@ four are not engineering tasks, which is why they have stayed open.
 ## Blocking a first customer
 
 5. **Device testing.** No postback from a real handset, no React Native app
-   built end to end, the Kotlin uncompiled. See
+   built end to end. The Kotlin compiles in CI but has never run. See
    [DEVICE_TESTING.md](../DEVICE_TESTING.md) for exactly what needs doing.
 6. **At least one real ad network adapter.** The framework is built and no
    network is integrated, so there is currently nobody to send conversions to.

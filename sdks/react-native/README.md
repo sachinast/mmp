@@ -164,9 +164,9 @@ sends the same value and the server matches them all to each other.
   executed on a simulator** (`make sdk-ios-device`). Running it is what found
   that `uname` returns the host architecture on a simulator, so every simulator
   install was reporting a device model of `arm64`.
-- The Kotlin has a standalone Gradle build (`make sdk-android`) but **has not
-  been compiled** on the machine this was written on — that needs a JDK 17–21
-  and a few GB free.
+- The Kotlin **compiles and lints in CI** on every push, against a real Android
+  SDK (`make sdk-android`). Locally it needs a JDK 17–21; the target skips
+  without one so `make check` still runs.
 - Neither native half has run on real hardware.
 
 `docs/DEVICE_TESTING.md` lists what only a real phone can verify, and why each

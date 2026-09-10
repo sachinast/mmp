@@ -28,10 +28,15 @@ other check in the table.
   bundles (`Contents/jbr`). Install a 21 and point `JAVA_HOME` at it.
 - **Several GB free.** Gradle's caches and the Android build tools are large.
 
-Both are why the Kotlin has not been compiled on the machine this was written
-on: it had under 1 GB free. The build configuration is committed and the target
-skips rather than fails when the toolchain is absent — but treat "compiles" as
-unproven until you have run it.
+Both are why the Kotlin was not compiled locally for a long time: the machine
+this was written on had a JDK 25, which Gradle refuses, and under 1 GB free.
+
+**It compiles in CI now.** The `android` job in `.github/workflows/ci.yml`
+builds and lints the module against a real Android SDK on every push, so
+"compiles" is no longer an assumption. The target still skips locally when the
+toolchain is absent, so `make check` works on a machine without one —
+`MMP_REQUIRE_ANDROID=1` turns that skip into a failure, and CI sets it, because
+a skip that reports success is how a job stays green while nothing runs.
 
 ## Only verifiable on real hardware
 
@@ -103,7 +108,7 @@ Stated plainly, because the rest of this document could otherwise read as
 completeness:
 
 - No postback has ever been received from a real device.
-- The Kotlin has not been compiled (see prerequisites above).
+- The Kotlin compiles and lints in CI, but has never run on a device.
 - No React Native app has been built against this SDK end to end; the JavaScript
   is tested in isolation and the native cores separately.
 - The backup/restore case above has not been performed.

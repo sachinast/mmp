@@ -64,8 +64,8 @@ From [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md):
   apps, campaigns, tracking links and API keys are all created from the UI.
   Integration *creation* is still API-only — it takes a network's credentials,
   and a form that handles secrets is worth designing rather than adding.
-- **Android native module uncompiled.** Build config committed; needs a JDK
-  17–21 and disk space. See [DEVICE_TESTING.md](../DEVICE_TESTING.md).
+- **Android native module never run.** It compiles and lints in CI against a
+  real Android SDK, but no build of it has executed on a device or emulator.
 - **No device testing.** No postback from a real handset, no RN app built end to
   end.
 - **Conversion-window stitching.** SKAdNetwork 4 sends up to three postbacks per
