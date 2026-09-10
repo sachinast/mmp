@@ -60,10 +60,8 @@ From [PRODUCTION_CHECKLIST.md](../PRODUCTION_CHECKLIST.md):
 
 ## Not done, and merely incomplete
 
-- **Dashboard.** Covers every reporting and configuration view, and onboarding:
-  apps, campaigns, tracking links and API keys are all created from the UI.
-  Integration *creation* is still API-only — it takes a network's credentials,
-  and a form that handles secrets is worth designing rather than adding.
+- **Dashboard.** Covers every reporting and configuration view, onboarding, and
+  connecting a network. No flow is API-only any more.
 - **Android native module never run.** It compiles and lints in CI against a
   real Android SDK, but no build of it has executed on a device or emulator.
 - **No device testing.** No postback from a real handset, no RN app built end to

@@ -50,11 +50,23 @@ INTEGRATION_COLUMNS = (
 )
 
 
+class ProviderFieldInfo(BaseModel):
+    """What an adapter needs configured, so a form can be built from the adapter
+    instead of from a second copy of its requirements."""
+
+    name: str
+    label: str
+    secret: bool
+    required: bool
+    hint: str
+
+
 class ProviderInfo(BaseModel):
     name: str
     display_name: str
     auth_style: str
     capabilities: list[str]
+    fields: list[ProviderFieldInfo]
     # So a dashboard can show what will be sent under what name, rather than
     # leaving someone to discover the translation from a network's report.
     event_map: dict[str, str]
@@ -103,6 +115,16 @@ async def list_providers(
             auth_style=str(provider.auth_style),
             capabilities=sorted(str(c) for c in provider.capabilities),
             event_map=dict(provider.event_map),
+            fields=[
+                ProviderFieldInfo(
+                    name=field.name,
+                    label=field.label,
+                    secret=field.secret,
+                    required=field.required,
+                    hint=field.hint,
+                )
+                for field in provider.fields
+            ],
         )
         for provider in registry.available()
     ]

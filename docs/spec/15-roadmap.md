@@ -30,8 +30,6 @@ four are not engineering tasks, which is why they have stayed open.
 7. **Billing, or an explicit decision not to charge yet.** Metering exists;
    billing does not. Four commercial questions block it — see
    [08](08-billing.md).
-8. **A form for creating integrations.** The only remaining API-only flow. It
-   takes credentials, so it needs designing rather than adding.
 
 ## Worth doing next
 

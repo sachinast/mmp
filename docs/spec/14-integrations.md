@@ -64,7 +64,15 @@ configuration; silently sending an event someone tried to exclude is not.
 ## Credentials
 
 Envelope-encrypted (AES-256-GCM, KMS-wrapped DEK, AAD bound to the
-organisation). Only the **names** of supplied fields are ever returned. Validated
+organisation). Only the **names** of supplied fields are ever returned.
+
+Each adapter declares what it needs — field name, label, whether it is secret,
+whether it is required — and the dashboard renders a form from that. The
+declaration is what decides where a value goes: secret fields become encrypted
+credentials, everything else is plain configuration. A test asserts every
+declared-required field is one `validate()` actually rejects the absence of,
+because two statements of the same requirement drift, and the way it fails is a
+form that stops asking for something still mandatory. Validated
 against the adapter at save time, returning all problems at once rather than one
 per attempt.
 

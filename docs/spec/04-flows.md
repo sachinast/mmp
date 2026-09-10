@@ -109,8 +109,10 @@ dashboard. Until recently none of them were: every create flow lived only in
 the API, so the honest instruction for a new customer was "run these curl
 commands", which is not a product.
 
-**Still API-only:** creating an integration. It takes a network's credentials,
-and a form that handles secrets deserves designing rather than adding.
+Connecting a network is a form too, rendered from the adapter's own declaration
+of what it needs — so adding an adapter adds its form, and nothing in the
+dashboard knows a single field name. Fields marked secret become
+envelope-encrypted credentials; everything else is plain configuration.
 
 The key form renders its result rather than redirecting. The raw key exists
 exactly once — only an HMAC is stored — so a redirect would put a live

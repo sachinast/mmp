@@ -113,6 +113,28 @@ class ProviderConfig:
     settings: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ProviderField:
+    """One thing an adapter needs configured, declared so a form can ask for it.
+
+    The adapter already knows what it requires — ``validate()`` refuses without
+    it. What it could not do was *say so* in advance, so anything building a
+    form had to hardcode the field names, putting adapter knowledge in a second
+    place that drifts.
+
+    ``secret`` decides where the value goes: secrets are envelope-encrypted as
+    credentials and never returned, everything else is plain configuration. A
+    test asserts every declared-required field is one ``validate()`` actually
+    rejects the absence of, so the declaration cannot drift from the behaviour.
+    """
+
+    name: str
+    label: str
+    secret: bool = False
+    required: bool = True
+    hint: str = ""
+
+
 @runtime_checkable
 class Provider(Protocol):
     """What every adapter implements.
@@ -135,6 +157,9 @@ class Provider(Protocol):
     # says that is not a supported thing to do; the MappingProxyType in each
     # adapter enforces it at runtime.
     event_map: ClassVar[Mapping[str, str]]
+    # What this adapter needs configured, so a form can be rendered from the
+    # adapter rather than from a second copy of its requirements.
+    fields: ClassVar[tuple[ProviderField, ...]]
 
     def validate(self, config: ProviderConfig) -> list[str]:
         """Return the reasons this configuration cannot work, if any.

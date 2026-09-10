@@ -348,6 +348,7 @@ def test_a_new_adapter_needs_only_one_file():
     """The framework's promise, checked rather than asserted in a comment."""
     from mmp_providers.base import DeliveryVerdict as _V
     from mmp_providers.base import PreparedRequest as _R
+    from mmp_providers.base import ProviderField
 
     class Minimal:
         name = "minimal"
@@ -355,6 +356,11 @@ def test_a_new_adapter_needs_only_one_file():
         capabilities = frozenset({Capability.INSTALLS})
         auth_style = AuthStyle.NONE
         event_map: ClassVar[Mapping[str, str]] = MappingProxyType({"install": "install"})
+        # Part of the contract on purpose. An adapter that does not say what it
+        # needs cannot be configured from the dashboard, and the failure is
+        # silent: an empty form that saves an integration which then never
+        # delivers. One tuple is a small price for that.
+        fields: ClassVar[tuple[ProviderField, ...]] = ()
 
         def validate(self, config: ProviderConfig) -> list[str]:
             return []
@@ -372,3 +378,62 @@ def test_a_new_adapter_needs_only_one_file():
         Minimal().prepare(event_name="install", context={}, config=None), PreparedRequest
     )
     assert isinstance(Minimal().interpret(status_code=200, body=""), DeliveryVerdict)
+
+
+# --- declared fields must match what validate() enforces -----------------
+def test_every_adapter_declares_the_fields_it_needs():
+    from mmp_providers.registry import available, load_builtin_once
+
+    load_builtin_once()
+    for provider in available():
+        assert provider.fields, f"{provider.name} declares no fields"
+        for declared in provider.fields:
+            assert declared.name and declared.label, f"{provider.name}: {declared}"
+
+
+def test_a_declared_required_field_is_one_validate_actually_rejects():
+    """The declaration drives a form; validate() decides what is accepted.
+
+    Two statements of the same requirement drift, and the direction that hurts
+    is a form that stops asking for something still mandatory — the operator
+    fills the form, saves, and gets a rejection listing a field they were never
+    shown. So every required declaration is checked against the behaviour.
+    """
+    from mmp_providers.base import ProviderConfig
+    from mmp_providers.registry import available, load_builtin_once
+
+    load_builtin_once()
+    for provider in available():
+        required = [f for f in provider.fields if f.required]
+        for missing in required:
+            credentials = {f.name: "x" for f in provider.fields if f.secret and f is not missing}
+            settings: dict[str, object] = {
+                f.name: "https://example.com/x"
+                for f in provider.fields
+                if not f.secret and f is not missing
+            }
+            settings.pop("event_map", None)
+            problems = provider.validate(ProviderConfig(credentials=credentials, settings=settings))
+            assert any(missing.name in problem for problem in problems), (
+                f"{provider.name} declares {missing.name!r} required, but validate() "
+                f"accepts it missing: {problems}"
+            )
+
+
+def test_an_optional_field_is_not_required_by_validate():
+    """The other direction: a field the form marks optional must not be one the
+    save then refuses without."""
+    from mmp_providers.base import ProviderConfig
+    from mmp_providers.registry import available, load_builtin_once
+
+    load_builtin_once()
+    for provider in available():
+        credentials = {f.name: "x" for f in provider.fields if f.secret and f.required}
+        settings: dict[str, object] = {
+            f.name: "https://example.com/x" for f in provider.fields if not f.secret and f.required
+        }
+        problems = provider.validate(ProviderConfig(credentials=credentials, settings=settings))
+        assert problems == [], (
+            f"{provider.name} rejects a configuration containing every required "
+            f"field and no optional one: {problems}"
+        )

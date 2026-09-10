@@ -10,6 +10,56 @@
 {% if error %}
   {% include "partials/error.html" %}
 {% else %}
+  {% if notice %}
+    <div class="error" style="border-left-color: var(--good)">
+      <strong style="color: var(--good)">{{ notice }}</strong>
+    </div>
+  {% endif %}
+
+  {# One form per adapter, built from what that adapter says it needs. Nothing
+     here knows the name of a single field: add an adapter and its form appears.
+     #}
+  <h2>Connect a network</h2>
+  <div class="grid cols-2" style="margin-bottom:18px">
+    {% for provider in providers %}
+      <div class="card">
+        <h2 style="margin-top:0">{{ provider.display_name }}</h2>
+        <p class="meta" style="margin-bottom:12px">
+          <code>{{ provider.name }}</code> · auth {{ provider.auth_style }}
+        </p>
+        <form method="post" action="/integrations">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="provider" value="{{ provider.name }}">
+          <div>
+            <label for="name-{{ provider.name }}">Name</label>
+            <input id="name-{{ provider.name }}" name="name" required
+                   placeholder="Network A (production)" style="width:100%">
+          </div>
+          {% for field in provider.fields %}
+            <div style="margin-top:10px">
+              <label for="{{ provider.name }}-{{ field.name }}">
+                {{ field.label }}{% if not field.required %} <span class="pill">optional</span>{% endif %}
+              </label>
+              {# type=password for a secret: it keeps the value out of the
+                 screen, out of a screenshot, and out of the browser's ordinary
+                 form history. It is not encryption — that happens server-side —
+                 but showing a token in plain text on a shared screen is a way
+                 to lose one. #}
+              <input id="{{ provider.name }}-{{ field.name }}"
+                     name="field_{{ field.name }}"
+                     type="{% if field.secret %}password{% else %}text{% endif %}"
+                     {% if field.secret %}autocomplete="off" spellcheck="false"{% endif %}
+                     {% if field.required %}required{% endif %}
+                     style="width:100%">
+              {% if field.hint %}<p class="meta">{{ field.hint }}</p>{% endif %}
+            </div>
+          {% endfor %}
+          <button type="submit" style="margin-top:12px">Connect</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+
   <h2>Configured</h2>
   {% if not integrations %}
     <div class="card">

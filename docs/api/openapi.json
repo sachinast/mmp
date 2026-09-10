@@ -5203,6 +5203,40 @@
         "type": "object",
         "title": "PostbackRuleUpdate"
       },
+      "ProviderFieldInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "secret": {
+            "type": "boolean",
+            "title": "Secret"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "hint": {
+            "type": "string",
+            "title": "Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "secret",
+          "required",
+          "hint"
+        ],
+        "title": "ProviderFieldInfo",
+        "description": "What an adapter needs configured, so a form can be built from the adapter\ninstead of from a second copy of its requirements."
+      },
       "ProviderInfo": {
         "properties": {
           "name": {
@@ -5224,6 +5258,13 @@
             "type": "array",
             "title": "Capabilities"
           },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderFieldInfo"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
           "event_map": {
             "additionalProperties": {
               "type": "string"
@@ -5238,6 +5279,7 @@
           "display_name",
           "auth_style",
           "capabilities",
+          "fields",
           "event_map"
         ],
         "title": "ProviderInfo"

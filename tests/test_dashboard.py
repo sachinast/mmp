@@ -831,3 +831,143 @@ async def test_a_rejected_creation_shows_the_api_s_reason(signed_in):
     assert response.status_code == 303
     assert "notice=" in response.headers["location"]
     assert "/apps?" in response.headers["location"]
+
+
+async def test_the_integration_form_is_built_from_the_adapter(signed_in):
+    """Nothing in the dashboard knows a single field name.
+
+    The adapter declares what it needs and the form renders that, so adding an
+    adapter adds its form. The alternative — enumerating fields in a template —
+    is a second copy of the adapter's requirements, and the way it fails is a
+    form that stops asking for something still mandatory: the operator fills it
+    in, saves, and is rejected for a field they were never shown.
+    """
+    response = await signed_in["client"].get("/integrations")
+    assert response.status_code == 200
+    # s2s_json declares api_token (secret), endpoint, event_map (optional).
+    assert 'name="field_api_token"' in response.text
+    assert 'name="field_endpoint"' in response.text
+    # custom declares url_template.
+    assert 'name="field_url_template"' in response.text
+
+
+async def test_a_secret_field_renders_as_a_password_input(signed_in):
+    """Not encryption — that is server-side — but a token in plain text on a
+    shared screen is a way to lose one."""
+    import re
+
+    response = await signed_in["client"].get("/integrations")
+    token_input = re.search(r"<input[^>]*name=\"field_api_token\"[^>]*>", response.text)
+    assert token_input, "the token field should be rendered"
+    assert 'type="password"' in token_input.group(0)
+
+    endpoint_input = re.search(r"<input[^>]*name=\"field_endpoint\"[^>]*>", response.text)
+    assert endpoint_input and 'type="text"' in endpoint_input.group(0)
+
+
+async def test_creating_an_integration_stores_the_secret_and_never_shows_it(signed_in):
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    secret = "tok_must_never_be_rendered"
+
+    created = await web.post(
+        "/integrations",
+        data={
+            "csrf_token": csrf,
+            "provider": "s2s_json",
+            "name": "Network A",
+            "field_api_token": secret,
+            "field_endpoint": "https://example.com/conversions",
+        },
+        follow_redirects=True,
+    )
+    assert "Network A" in created.text
+    # The field's *name* is shown so an operator can see what was supplied.
+    assert "api_token" in created.text
+    assert secret not in created.text
+
+
+async def test_a_malformed_event_map_is_answered_here_not_by_a_422(signed_in):
+    """The one field that is not a string. A JSON typo should come back as a
+    sentence, not as an API complaint about a type the operator never chose."""
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    response = await web.post(
+        "/integrations",
+        data={
+            "csrf_token": csrf,
+            "provider": "s2s_json",
+            "name": "Bad map",
+            "field_api_token": "t",
+            "field_endpoint": "https://example.com/x",
+            "field_event_map": "{not json",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "event+map+must+be+valid+JSON" in response.headers["location"].replace("%20", "+")
+
+
+async def test_an_unknown_adapter_is_refused_before_any_request(signed_in, monkeypatch):
+    from mmp_web import app as web_app
+
+    forwarded: list[str] = []
+    original = web_app.ApiClient.post
+
+    async def recording_post(self, path, **kwargs):
+        forwarded.append(path)
+        return await original(self, path, **kwargs)
+
+    monkeypatch.setattr(web_app.ApiClient, "post", recording_post)
+
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    response = await web.post(
+        "/integrations",
+        data={"csrf_token": csrf, "provider": "not_a_real_adapter", "name": "X"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert forwarded == []
+
+
+async def test_a_secret_is_sent_as_a_credential_never_as_configuration(signed_in, monkeypatch):
+    """Where the value goes decides whether it is encrypted.
+
+    Credentials are envelope-encrypted and only their names are ever returned;
+    configuration is stored and returned as plain data. A secret routed into
+    configuration is a token written to the database in clear and handed back
+    by the API — and it would look fine from the page, which is why this
+    asserts the request body rather than the rendering.
+    """
+    from mmp_web import app as web_app
+
+    sent: list[dict] = []
+    original = web_app.ApiClient.post
+
+    async def capturing_post(self, path, **kwargs):
+        if path == "/v1/integrations":
+            sent.append(kwargs.get("json") or {})
+        return await original(self, path, **kwargs)
+
+    monkeypatch.setattr(web_app.ApiClient, "post", capturing_post)
+
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    await web.post(
+        "/integrations",
+        data={
+            "csrf_token": csrf,
+            "provider": "s2s_json",
+            "name": "Routing",
+            "field_api_token": "tok_secret",
+            "field_endpoint": "https://example.com/x",
+        },
+        follow_redirects=False,
+    )
+
+    assert sent, "the integration should have been forwarded"
+    body = sent[0]
+    assert body["credentials"] == {"api_token": "tok_secret"}
+    assert "api_token" not in body["configuration"]
+    assert body["configuration"] == {"endpoint": "https://example.com/x"}

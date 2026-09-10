@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -854,6 +855,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context |= {
                 "integrations": await api.get("/v1/integrations") or [],
                 "providers": await api.get("/v1/providers") or [],
+                "notice": request.query_params.get("notice"),
                 "error": None,
             }
             return render("integrations.html", context)
@@ -861,6 +863,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return login_redirect(request)
         except ApiError as exc:
             return await _error_page(request, api, "integrations", "integrations.html", exc)
+
+    @app.post("/integrations", include_in_schema=False)
+    async def create_integration_action(request: Request) -> Response:
+        """Fields are read from the form by name, using the adapter's own
+        declaration to decide which are secret.
+
+        Deliberately not a fixed signature: the fields belong to the adapter, and
+        enumerating them here would put a second copy of its requirements in the
+        dashboard — the thing that made this form worth waiting for rather than
+        hardcoding.
+        """
+        api = client_for(request)
+        form = await request.form()
+        csrf_token = str(form.get("csrf_token") or "")
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/integrations", status_code=status.HTTP_303_SEE_OTHER)
+
+        provider_name = str(form.get("provider") or "")
+        try:
+            providers = await api.get("/v1/providers") or []
+            provider = next((p for p in providers if p["name"] == provider_name), None)
+            if provider is None:
+                return _notice("/integrations", f"unknown adapter: {provider_name}")
+
+            credentials: dict[str, str] = {}
+            configuration: dict[str, Any] = {}
+            for field in provider["fields"]:
+                value = str(form.get(f"field_{field['name']}") or "").strip()
+                if not value:
+                    continue
+                if field["secret"]:
+                    credentials[field["name"]] = value
+                elif field["name"] == "event_map":
+                    # The one field that is not a string. Parsed here so a typo
+                    # is a message on this page rather than a 422 from the API
+                    # about a type the operator never chose.
+                    try:
+                        configuration[field["name"]] = json.loads(value)
+                    except ValueError:
+                        return _notice("/integrations", "event map must be valid JSON")
+                else:
+                    configuration[field["name"]] = value
+
+            await api.post(
+                "/v1/integrations",
+                json={
+                    "provider": provider_name,
+                    "name": str(form.get("name") or "").strip(),
+                    "credentials": credentials,
+                    "configuration": configuration,
+                },
+            )
+            return _notice("/integrations", f"Connected {form.get('name')}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            # The API validates against the adapter and returns every problem at
+            # once. Passing that through beats inventing a summary of it.
+            return _notice("/integrations", exc.detail)
 
     # ----------------------------------------------------------- export
     @app.get("/export", response_class=HTMLResponse, include_in_schema=False)

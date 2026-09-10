@@ -23,6 +23,7 @@ from mmp_providers.base import (
     DeliveryVerdict,
     PreparedRequest,
     ProviderConfig,
+    ProviderField,
     unknown_variables,
 )
 from mmp_providers.registry import register
@@ -45,6 +46,24 @@ class CustomProvider:
     # Identity: a custom integration uses our vocabulary because there is no
     # other party's to translate into.
     event_map: ClassVar[Mapping[str, str]] = MappingProxyType({})
+
+    fields: ClassVar[tuple[ProviderField, ...]] = (
+        ProviderField(
+            name="url_template",
+            label="URL template",
+            hint=(
+                "https URL with {click_id}, {campaign_id}, {event_name} and the "
+                "other exposed variables. Substituted from an allowlist — never "
+                "evaluated."
+            ),
+        ),
+        ProviderField(
+            name="method",
+            label="HTTP method",
+            required=False,
+            hint="GET unless the network asks otherwise.",
+        ),
+    )
 
     def validate(self, config: ProviderConfig) -> list[str]:
         problems: list[str] = []

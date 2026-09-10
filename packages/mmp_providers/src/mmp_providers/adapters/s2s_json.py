@@ -29,6 +29,7 @@ from mmp_providers.base import (
     DeliveryVerdict,
     PreparedRequest,
     ProviderConfig,
+    ProviderField,
     missing_credentials,
 )
 from mmp_providers.registry import register
@@ -65,6 +66,29 @@ class S2SJsonProvider:
     )
     auth_style = AuthStyle.BEARER
     event_map: ClassVar[Mapping[str, str]] = MappingProxyType(dict(DEFAULT_EVENT_MAP))
+
+    fields: ClassVar[tuple[ProviderField, ...]] = (
+        ProviderField(
+            name="api_token",
+            label="API token",
+            secret=True,
+            hint="Sent as a bearer token. Encrypted at rest and never shown again.",
+        ),
+        ProviderField(
+            name="endpoint",
+            label="Endpoint",
+            hint="The https URL conversions are POSTed to.",
+        ),
+        ProviderField(
+            name="event_map",
+            label="Event map (JSON)",
+            required=False,
+            hint=(
+                "Replaces the default map rather than merging into it, so it is "
+                "a filter as well as a translation: anything absent is not sent."
+            ),
+        ),
+    )
 
     def validate(self, config: ProviderConfig) -> list[str]:
         problems = missing_credentials(config, REQUIRED_CREDENTIALS)
