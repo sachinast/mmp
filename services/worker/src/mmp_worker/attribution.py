@@ -43,6 +43,12 @@ ATTRIBUTION_GROUP = "attribution-writer"
 INSTALL_EVENTS = frozenset({"install"})
 IDENTITY_EVENTS = frozenset({"login", "signup"})
 
+# How long an app's attribution settings may be stale. Short enough that a
+# window someone just changed starts applying while they are still looking at
+# the screen; long enough that a busy app is not re-reading the same row on
+# every install.
+APP_CONFIG_TTL = dt.timedelta(seconds=60)
+
 APP_CONFIG_SQL = """
 SELECT organization_id, install_window_days, event_window_days
 FROM apps WHERE id = $1
@@ -83,11 +89,13 @@ class AttributionConsumer:
         consumer_name: str,
         batch_size: int = 500,
         idle_sleep: float = 0.1,
+        config_ttl: dt.timedelta = APP_CONFIG_TTL,
     ) -> None:
         self._redis = redis
         self._database = database
         self._batch_size = batch_size
         self._idle_sleep = idle_sleep
+        self._config_ttl = config_ttl
         self._consumer: StreamConsumer[QueuedEvent] = StreamConsumer(
             redis,
             stream=EVENTS_STREAM,
@@ -95,7 +103,10 @@ class AttributionConsumer:
             consumer=consumer_name,
             decoder_type=QueuedEvent,
         )
-        self._app_config: dict[uuid.UUID, tuple[uuid.UUID, int, int]] = {}
+        # Config, and when it goes stale. Bounded rather than permanent: an
+        # attribution window a customer changed has to start applying without
+        # anyone restarting a worker.
+        self._app_config: dict[uuid.UUID, tuple[tuple[uuid.UUID, int, int], dt.datetime]] = {}
         self.metrics = AttributionMetrics()
         self._stopping = False
 
@@ -140,14 +151,30 @@ class AttributionConsumer:
         return len(messages)
 
     async def _config(self, app_id: uuid.UUID) -> tuple[uuid.UUID, int, int] | None:
-        """App attribution settings, cached for the process's lifetime.
+        """App attribution settings, cached briefly.
 
-        Read on every install; changes take effect on the next deploy or
-        restart. Windows are copied onto each attribution row anyway, so a stale
-        value here cannot corrupt history — it can only delay a change.
+        Cached for the process's lifetime until this had an expiry, which meant
+        an advertiser could change their install window through the API, see the
+        new value returned, see it in the dashboard, and have attribution keep
+        using the old one until someone restarted the worker. An install outside
+        the old window and inside the new one was reported organic — a
+        measurement error, invisible, on a number they are billed for.
+
+        A TTL rather than LISTEN/NOTIFY, unlike the tracker's link cache. That
+        cache sits in a 2 ms redirect where a query per lookup would show, and
+        needs "I disabled that link" to mean something within milliseconds. This
+        is a worker that already does a database round trip per install; one
+        more per app per minute is not worth a listener connection to avoid.
+
+        Windows are still copied onto each attribution row, so a stale value
+        cannot corrupt history — but it can no longer quietly ignore a change
+        either.
         """
-        if app_id in self._app_config:
-            return self._app_config[app_id]
+        cached = self._app_config.get(app_id)
+        now = dt.datetime.now(dt.UTC)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+
         async with self._database.acquire_raw() as conn:
             row = await conn.fetchrow(APP_CONFIG_SQL, app_id)
         if row is None:
@@ -157,7 +184,7 @@ class AttributionConsumer:
             row["install_window_days"],
             row["event_window_days"],
         )
-        self._app_config[app_id] = config
+        self._app_config[app_id] = (config, now + self._config_ttl)
         return config
 
     async def _handle(self, event: QueuedEvent) -> None:

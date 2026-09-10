@@ -88,6 +88,27 @@ Partition bounds are written with explicit `+00` and the roles are pinned to
 UTC — resolving bounds in a session timezone put data in the wrong partition by
 5.5 hours during development.
 
+### Cached configuration
+
+Two caches hold things a customer can change, and both bound how long a change
+can go unapplied:
+
+| Cache | Freshness |
+|---|---|
+| Tracker link cache | `LISTEN`/`NOTIFY` plus a five-minute resync |
+| Worker app settings | 60-second TTL |
+
+The worker's uses a TTL rather than a notification on purpose. The link cache
+sits in a 2 ms redirect where a query per lookup would show, and needs "I
+disabled that link" to mean something within milliseconds. The worker already
+does a database round trip per install; one more per app per minute is not
+worth a listener connection to avoid.
+
+Neither was always bounded. The attribution settings were cached for the life
+of the process, so an advertiser could change their install window, get a 200,
+see it in the dashboard, and have attribution keep using the old one until
+someone restarted a worker.
+
 ## Failure behaviour
 
 | Failure | Behaviour |

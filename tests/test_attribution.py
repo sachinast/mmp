@@ -822,3 +822,80 @@ async def test_link_user_refuses_to_mirror_an_entry_with_no_expiry(ingest_redis,
 
     assert not await ingest_redis.exists(_cache_key(app_id, "user:u-3"))
     assert entries == [("identity_link_skipped", "source_has_no_expiry")], entries
+
+
+# --- app settings must not be cached forever -----------------------------
+async def test_a_changed_attribution_window_reaches_the_worker(
+    seeded_app, ingest_redis, owner_conn
+):
+    """The window used to be cached for the life of the process.
+
+    An advertiser could change it through the API, get a 200, see the new value
+    in the dashboard, and have attribution keep applying the old one until
+    somebody restarted a worker. An install outside the old window and inside
+    the new one was then reported organic — a measurement error, invisible, on a
+    number they are billed for.
+    """
+    import datetime as _dt
+
+    from mmp_db.pool import Database
+    from mmp_worker.attribution import AttributionConsumer
+
+    from tests.conftest_api import build_settings_for
+
+    database = await Database.connect(build_settings_for("mmp_worker"), role="mmp_worker")
+    try:
+        consumer = AttributionConsumer(
+            redis=ingest_redis,
+            database=database,
+            consumer_name="config-ttl",
+            config_ttl=_dt.timedelta(seconds=0),
+        )
+        app_id = seeded_app["app_id"]
+
+        before = await consumer._config(app_id)
+        assert before is not None
+        assert before[1] == 7, "the seeded window"
+
+        await owner_conn.execute("UPDATE apps SET install_window_days = 14 WHERE id = $1", app_id)
+        after = await consumer._config(app_id)
+        assert after is not None
+        assert after[1] == 14, "a changed window must reach attribution"
+    finally:
+        await owner_conn.execute(
+            "UPDATE apps SET install_window_days = 7 WHERE id = $1", seeded_app["app_id"]
+        )
+        await database.close()
+
+
+async def test_the_window_is_still_cached_within_its_ttl(seeded_app, ingest_redis, owner_conn):
+    """The other half: this is a cache, not a read-through.
+
+    Without it the worker would query the same row on every install of a busy
+    app, which is what the cache exists to avoid.
+    """
+    import datetime as _dt
+
+    from mmp_db.pool import Database
+    from mmp_worker.attribution import AttributionConsumer
+
+    from tests.conftest_api import build_settings_for
+
+    database = await Database.connect(build_settings_for("mmp_worker"), role="mmp_worker")
+    try:
+        consumer = AttributionConsumer(
+            redis=ingest_redis,
+            database=database,
+            consumer_name="config-cached",
+            config_ttl=_dt.timedelta(minutes=5),
+        )
+        app_id = seeded_app["app_id"]
+        assert (await consumer._config(app_id))[1] == 7
+
+        await owner_conn.execute("UPDATE apps SET install_window_days = 21 WHERE id = $1", app_id)
+        assert (await consumer._config(app_id))[1] == 7, "still within the TTL"
+    finally:
+        await owner_conn.execute(
+            "UPDATE apps SET install_window_days = 7 WHERE id = $1", seeded_app["app_id"]
+        )
+        await database.close()
