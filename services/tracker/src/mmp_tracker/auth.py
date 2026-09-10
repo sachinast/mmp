@@ -16,13 +16,13 @@ import datetime as dt
 
 import msgspec
 from mmp_core.logging import get_logger
-from mmp_crypto.keys import parse_key, verify_key
+from mmp_crypto.keys import api_key_cache_key, parse_key, verify_key
 from mmp_db.pool import Database
 from redis.asyncio import Redis
 
 log = get_logger(__name__)
 
-CACHE_PREFIX = "apikey:"
+
 CACHE_TTL = dt.timedelta(minutes=10)
 # A negative cache, so a flood of invalid keys cannot be turned into a flood of
 # database lookups. Short, because a key created a moment ago should work.
@@ -71,7 +71,7 @@ class KeyAuthenticator:
         if parsed is None:
             raise AuthError("malformed key")
 
-        cache_key = CACHE_PREFIX + parsed.prefix
+        cache_key = api_key_cache_key(parsed.prefix)
         cached = await self._redis.get(cache_key)
 
         if cached == NEGATIVE_MARKER or cached == NEGATIVE_MARKER.encode():

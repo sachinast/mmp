@@ -60,29 +60,27 @@ async def test_bad_key_is_indistinguishable_from_unknown_key(tracker, seeded_app
 
 async def test_revoked_key_stops_working_immediately(tracker, owner_conn, seeded_app):
     """Revocation must not wait for a cache TTL."""
-    from mmp_crypto.keys import parse_key
-    from mmp_tracker.auth import CACHE_PREFIX
+    from mmp_crypto.keys import api_key_cache_key, parse_key
 
     assert (await tracker.post("/v1/events", json={"events": [sample_event()]})).status_code == 202
 
     prefix = parse_key(seeded_app["api_key"]).prefix
     await owner_conn.execute("UPDATE api_keys SET status = 'revoked' WHERE key_prefix = $1", prefix)
     state = tracker.tracker_app.state.tracker
-    await state.redis.delete(f"{CACHE_PREFIX}{prefix}")
+    await state.redis.delete(api_key_cache_key(prefix))
 
     after = await tracker.post("/v1/events", json={"events": [sample_event()]})
     assert after.status_code == 401
 
 
 async def test_disabled_app_stops_accepting(tracker, owner_conn, seeded_app):
-    from mmp_crypto.keys import parse_key
-    from mmp_tracker.auth import CACHE_PREFIX
+    from mmp_crypto.keys import api_key_cache_key, parse_key
 
     await owner_conn.execute(
         "UPDATE apps SET status = 'disabled' WHERE id = $1", seeded_app["app_id"]
     )
     prefix = parse_key(seeded_app["api_key"]).prefix
-    await tracker.tracker_app.state.tracker.redis.delete(f"{CACHE_PREFIX}{prefix}")
+    await tracker.tracker_app.state.tracker.redis.delete(api_key_cache_key(prefix))
 
     response = await tracker.post("/v1/events", json={"events": [sample_event()]})
     assert response.status_code == 401

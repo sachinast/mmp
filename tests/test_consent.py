@@ -268,11 +268,10 @@ async def test_the_app_mode_decides_what_silence_means(
         "UPDATE apps SET consent_mode = $2 WHERE id = $1", seeded_app["app_id"], mode
     )
     # The key cache holds the old mode; clear it as a revocation would.
-    from mmp_crypto.keys import parse_key
-    from mmp_tracker.auth import CACHE_PREFIX
+    from mmp_crypto.keys import api_key_cache_key, parse_key
 
     prefix = parse_key(seeded_app["api_key"]).prefix
-    await tracker.tracker_app.state.tracker.redis.delete(f"{CACHE_PREFIX}{prefix}")
+    await tracker.tracker_app.state.tracker.redis.delete(api_key_cache_key(prefix))
 
     await tracker.post(
         "/v1/events",

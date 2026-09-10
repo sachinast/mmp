@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
-from mmp_crypto.keys import generate_key
+from mmp_crypto.keys import api_key_cache_key, generate_key
 from mmp_db.types import DbConn
 
 from mmp_api.context import AppContext
@@ -181,7 +181,7 @@ async def rotate_key(
     # Outside the transaction, and for the same reason as revoke_key: the
     # tracker caches authenticated keys, so a revocation the cache has not been
     # told about is not a revocation.
-    await context.redis.delete(f"apikey:{existing['key_prefix']}")
+    await context.redis.delete(api_key_cache_key(existing["key_prefix"]))
 
     log.info(
         "api_key_rotated",
@@ -212,5 +212,5 @@ async def revoke_key(
     # The tracker caches authenticated keys; without this the revoked key would
     # keep working until the cache expired. Revocation has to be immediate or it
     # is not revocation.
-    await context.redis.delete(f"apikey:{row['key_prefix']}")
+    await context.redis.delete(api_key_cache_key(row["key_prefix"]))
     log.info("api_key_revoked", key_id=str(key_id), actor=str(principal.user_id))

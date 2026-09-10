@@ -7,7 +7,7 @@ body, in the database, in the logs, or in a repr.
 from __future__ import annotations
 
 import pytest
-from mmp_crypto.keys import generate_key, parse_key, verify_key
+from mmp_crypto.keys import api_key_cache_key, generate_key, parse_key, verify_key
 
 from tests.conftest_api import register_account
 
@@ -176,7 +176,7 @@ async def test_revoked_key_is_evicted_from_the_tracker_cache(account, api_client
 
     app, created = await _app_and_key(account)
     redis = Redis.from_url(TEST_REDIS_URL, decode_responses=True)
-    cache_key = f"apikey:{created['key_prefix']}"
+    cache_key = api_key_cache_key(created["key_prefix"])
     await redis.set(cache_key, "cached-auth-record")
 
     response = await account.delete(f"/v1/apps/{app['id']}/keys/{created['id']}")
@@ -244,13 +244,13 @@ async def test_disabling_an_app_stops_ingestion_immediately(account, api_client)
 
     context = api_client._transport.app.state.context  # type: ignore[attr-defined]
     # Prime the cache the way an authenticated ingest would.
-    await context.redis.set(f"apikey:{prefix}", b"cached", ex=600)
-    assert await context.redis.exists(f"apikey:{prefix}")
+    await context.redis.set(api_key_cache_key(prefix), b"cached", ex=600)
+    assert await context.redis.exists(api_key_cache_key(prefix))
 
     disabled = await account.delete(f"/v1/apps/{app_id}")
     assert disabled.status_code == 204, disabled.text
 
-    assert not await context.redis.exists(f"apikey:{prefix}"), (
+    assert not await context.redis.exists(api_key_cache_key(prefix)), (
         "a disabled app's cached keys must be cleared, or it keeps ingesting"
     )
 
@@ -268,12 +268,12 @@ async def test_rotating_a_key_stops_the_old_one_at_once(account, api_client):
     old_prefix = first.json()["key_prefix"]
 
     context = api_client._transport.app.state.context  # type: ignore[attr-defined]
-    await context.redis.set(f"apikey:{old_prefix}", b"cached", ex=600)
+    await context.redis.set(api_key_cache_key(old_prefix), b"cached", ex=600)
 
     rotated = await account.post(f"/v1/apps/{app_id}/keys/{key_id}/rotate", json={})
     assert rotated.status_code in (200, 201), rotated.text
     assert rotated.json()["key_prefix"] != old_prefix
 
-    assert not await context.redis.exists(f"apikey:{old_prefix}"), (
+    assert not await context.redis.exists(api_key_cache_key(old_prefix)), (
         "the rotated-away key must stop working at once"
     )

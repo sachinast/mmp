@@ -9,6 +9,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
+from mmp_crypto.keys import api_key_cache_key
 from mmp_db.notify import notify_app_changed
 from mmp_db.types import DbConn
 
@@ -168,7 +169,7 @@ async def disable_app(
         "SELECT key_prefix FROM api_keys WHERE app_id = $1 AND status = 'active'", app_id
     )
     if prefixes:
-        await context.redis.delete(*[f"apikey:{row['key_prefix']}" for row in prefixes])
+        await context.redis.delete(*[api_key_cache_key(row["key_prefix"]) for row in prefixes])
 
     await notify_app_changed(conn, str(app_id))
     log.info("app_disabled", app_id=str(app_id), actor=str(principal.user_id))

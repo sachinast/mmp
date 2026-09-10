@@ -122,3 +122,20 @@ def parse_key(raw: str) -> ParsedKey | None:
 def verify_key(*, presented_secret: str, stored_hash: bytes, pepper: str) -> bool:
     """Constant-time comparison. ``==`` here leaks the hash a byte at a time."""
     return hmac.compare_digest(_hash(presented_secret, pepper), stored_hash)
+
+
+API_KEY_CACHE_PREFIX = "apikey:"
+
+
+def api_key_cache_key(prefix: str) -> str:
+    """Where the tracker caches an authenticated key record.
+
+    Here rather than in either service because both need it and they must
+    agree: the tracker writes these entries, and the API deletes them when a key
+    is revoked or rotated, or when an app is disabled. A revocation the cache
+    has not been told about is not a revocation.
+
+    It was a constant in the tracker and three separate literals in the API,
+    which agreed by inspection and nothing more.
+    """
+    return f"{API_KEY_CACHE_PREFIX}{prefix}"
