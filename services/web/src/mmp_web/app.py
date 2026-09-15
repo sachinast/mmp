@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Form, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mmp_core.context import request_id_var
 from mmp_core.settings import Settings
@@ -41,6 +41,7 @@ from mmp_web.formatting import bar_chart, count, default_range, money, parse_dat
 log = get_logger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+LIVE_SCRIPT = Path(__file__).parent / "static" / "live.js"
 
 # Grouped, because ten flat items is a list to read rather than a structure to
 # navigate. The groups follow what someone is doing — looking at numbers,
@@ -48,6 +49,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # service happens to serve each page.
 NAV_ITEMS = [
     {"key": "overview", "label": "Overview", "href": "/", "group": "Measure"},
+    {"key": "live", "label": "Live events", "href": "/live", "group": "Measure"},
     {"key": "apps", "label": "Apps", "href": "/apps", "group": "Measure"},
     {"key": "links", "label": "Tracking links", "href": "/links", "group": "Measure"},
     {"key": "events", "label": "Events", "href": "/events", "group": "Measure"},
@@ -114,12 +116,24 @@ METHOD_NOTES = {
     "probabilistic": "Fingerprint-based. This platform does not produce these.",
 }
 
-# Everything the dashboard loads is inline, so the policy can forbid every
-# external source outright. 'unsafe-inline' for style is the one concession:
-# the stylesheet is in the document, and hashing it would break on every edit
-# for no gain when there is no external CSS to defend against.
+# The dashboard loads nothing from anywhere else, so the policy forbids every
+# external source outright.
+#
+# Script is allowed from this origin only, for the live view — which cannot be
+# live without it. That is a narrower change than it looks: 'self' permits a
+# file this service serves, never inline script and never another host, so the
+# property the policy exists for still holds. A dashboard that loads third-party
+# JavaScript is one compromised CDN away from exfiltrating tenant data, and this
+# one still cannot. connect-src 'self' lets that script poll this origin and
+# nothing else, so even a script that went wrong could not send data elsewhere.
+#
+# 'unsafe-inline' for style is the one concession: the stylesheet is in the
+# document, and hashing it would break on every edit for no gain when there is
+# no external CSS to defend against.
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; "
+    "script-src 'self'; "
+    "connect-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; "
     "form-action 'self'; "
@@ -680,6 +694,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return login_redirect(request)
         except ApiError:
             return RedirectResponse("/export", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ------------------------------------------------------------- live
+    @app.get("/live", response_class=HTMLResponse, include_in_schema=False)
+    async def live_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "live")
+            apps, app_id, _from, _to = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "tracking_domain": tracking_domain,
+                "error": None,
+            }
+            return render("live.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "live", "live.html", exc)
+
+    @app.get("/live/feed", include_in_schema=False)
+    async def live_feed_proxy(request: Request) -> Response:
+        """The live view's poll target, answered as JSON in every case.
+
+        Never a redirect to the login page: this is fetched by script, and a 303
+        to an HTML form would arrive as a successful response the script cannot
+        parse. A status the script understands lets it say "your session ended"
+        instead of spinning.
+        """
+        api = client_for(request)
+        params = {
+            key: value for key, value in request.query_params.items() if key in {"app_id", "since"}
+        }
+        try:
+            data = await api.get(f"/v1/live?{urlencode(params)}")
+        except Unauthorized:
+            return JSONResponse({"error": "session_expired"}, status_code=401)
+        except ApiError as exc:
+            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+        except httpx.HTTPError:
+            return JSONResponse({"error": "api_unreachable"}, status_code=502)
+        return JSONResponse(data, headers={"cache-control": "no-store"})
+
+    @app.get("/static/live.js", include_in_schema=False)
+    async def live_script() -> Response:
+        """Served from this origin, which is the only place script-src allows.
+
+        Read per request rather than cached in memory so an edit shows up on
+        reload in development; the file is a few kilobytes and this is not the
+        hot path.
+        """
+        return Response(
+            content=LIVE_SCRIPT.read_bytes(),
+            media_type="text/javascript",
+            headers={"cache-control": "no-cache", "x-content-type-options": "nosniff"},
+        )
 
     # ------------------------------------------------------------ fraud
     @app.get("/fraud", response_class=HTMLResponse, include_in_schema=False)

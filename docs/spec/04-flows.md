@@ -101,8 +101,32 @@ happened.
 
 ## Dashboard
 
-Ten pages: overview, apps, tracking links, events, attribution, fraud,
-SKAdNetwork, deep links, integrations, export.
+Eleven pages: overview, **live events**, apps, tracking links, events,
+attribution, fraud, SKAdNetwork, deep links, integrations, export.
+
+### Live events
+
+Built for the moment someone integrates: fire an event from a test device and
+watch for it, or for the reason it was refused. Polls every two seconds and
+shows what was *stored*, which is the whole pipeline rather than just the edge.
+
+Rejections are the part nothing else records. A refused request used to leave
+no trace but a metric; the tracker now keeps the last fifty per app for an hour —
+the reason, never the payload, and only on the failure path.
+
+The script is the first JavaScript in the dashboard, which meant loosening the
+content-security policy from "no script" to `script-src 'self'`: a file this
+service serves, never inline, never another host. Event names are
+attacker-controlled — the SDK key ships inside the app — so the script renders
+feed data only through `textContent`; a test forbids `innerHTML` and its
+relatives, and an event named `<img onerror=...>` was verified in a browser to
+appear as text.
+
+Two bugs were caught before shipping, both found by reading the design rather
+than by a test failing. Events are timestamped when received but visible only
+once written, so a strict `since` cursor could drop an event forever between two
+polls — each poll now re-reads the previous minute. And pausing during an
+in-flight request let its response set the status back to "Live".
 
 Apps, campaigns, tracking links and API keys are all created from the
 dashboard. Until recently none of them were: every create flow lived only in

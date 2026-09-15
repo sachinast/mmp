@@ -19,6 +19,7 @@ from mmp_core.logging import get_logger
 from mmp_core.metrics import events_accepted, observe_rejection
 from mmp_crypto.pii import hash_device_id, hash_ip
 from mmp_ingest.consent import ConsentSet, Mode, Purpose, State, minimise
+from mmp_ingest.live import record_rejection
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
     EventBatch,
@@ -109,6 +110,13 @@ async def ingest_events(request: Request) -> Response:
     allowed = await state.limiter.check(f"ingest:{auth.app_id}", state.ingest_limit)
     if not allowed.allowed:
         observe_rejection("rate_limited")
+        await record_rejection(
+            state.redis,
+            auth.app_id,
+            status=429,
+            reason="rate_limited",
+            detail="too many requests for this app; the SDK retries with backoff",
+        )
         return JSONResponse(
             {"error": "rate_limited"},
             status_code=429,
@@ -120,15 +128,29 @@ async def ingest_events(request: Request) -> Response:
         batch = _batch_decoder.decode(body)
     except ValidationFailure as exc:
         observe_rejection("payload_too_large")
+        await record_rejection(
+            state.redis, auth.app_id, status=413, reason="payload_too_large", detail=exc.reason
+        )
         return JSONResponse({"error": "invalid_payload", "detail": exc.reason}, status_code=413)
     except msgspec.DecodeError as exc:
         observe_rejection("invalid_json")
+        await record_rejection(
+            state.redis, auth.app_id, status=400, reason="invalid_json", detail=str(exc)
+        )
         return JSONResponse({"error": "invalid_json", "detail": str(exc)}, status_code=400)
 
     if not batch.events:
         return JSONResponse({"accepted": 0, "duplicates": 0}, status_code=202)
     if len(batch.events) > MAX_EVENTS_PER_BATCH:
         observe_rejection("batch_too_large")
+        await record_rejection(
+            state.redis,
+            auth.app_id,
+            status=413,
+            reason="batch_too_large",
+            detail=f"at most {MAX_EVENTS_PER_BATCH} events per request",
+            events_in_batch=len(batch.events),
+        )
         return JSONResponse(
             {"error": "batch_too_large", "detail": f"at most {MAX_EVENTS_PER_BATCH} events"},
             status_code=413,
@@ -157,6 +179,17 @@ async def ingest_events(request: Request) -> Response:
             queued.append(event)
     except ValidationFailure as exc:
         observe_rejection("invalid_event")
+        # The whole batch is refused for one bad event, which is worth saying in
+        # the live view: "3 events rejected" with no mention of the other two is
+        # how someone concludes the SDK is losing data.
+        await record_rejection(
+            state.redis,
+            auth.app_id,
+            status=422,
+            reason="invalid_event",
+            detail=str(exc),
+            events_in_batch=len(batch.events),
+        )
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
     # Consent, before anything is queued.

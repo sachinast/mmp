@@ -155,7 +155,20 @@ if not hmac.compare_digest(expected, request.headers["x-mmp-signature"]):
 
 Use `compare_digest`, not `==`.
 
-## 7. Read your data
+## 7. Check it arrived
+
+Open **Live events** in the dashboard before you send anything. Clicks, installs,
+events and postback deliveries appear within a few seconds of being stored —
+stored, not merely received, so an event there has been through the whole
+pipeline.
+
+If something never appears, look for a red **rejected** row. The tracker keeps
+the last fifty refusals per app for an hour, with the reason: a revenue amount
+with no currency, malformed JSON, an SDK key sent to the server-to-server
+endpoint, a signature that did not verify. One invalid event refuses the whole
+request, and the row says how many went with it.
+
+## 8. Read your data
 
 ```bash
 curl -G https://api.example.com/v1/analytics/overview \

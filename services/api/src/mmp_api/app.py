@@ -21,6 +21,7 @@ from mmp_api.routes import (
     fraud,
     integrations,
     keys,
+    live,
     organizations,
     postbacks,
     privacy,
@@ -94,6 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         deeplinks.router,
         exports.router,
         skan.router,
+        live.router,
     ):
         app.include_router(router, prefix="/v1")
 

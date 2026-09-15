@@ -152,6 +152,17 @@ carrying the value of the `mmp_csrf` cookie.
 | `GET` | `/v1/skan/postbacks` | List Postbacks |
 | `GET` | `/v1/skan/summary` | Summarise |
 
+### Live events
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/v1/live` | Recent clicks, installs, events, postbacks and rejections for one app |
+
+Polled by the dashboard's live view, and usable directly. Pass the previous
+response's `server_time` as `since`. Each poll re-reads the minute before
+`since` so an event written late is not lost between polls — so de-duplicate on
+`kind` and `id`. Bounded to fifteen minutes; requires `member`.
+
 ### Fraud
 
 | Method | Path | Purpose |

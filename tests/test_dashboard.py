@@ -177,12 +177,51 @@ async def test_security_headers_and_csp(signed_in):
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
-async def test_no_external_resources_are_referenced(signed_in):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/",
+        "/apps",
+        "/links",
+        "/events",
+        "/attribution",
+        "/live",
+        "/fraud",
+        "/skan",
+        "/deep-links",
+        "/integrations",
+        "/export",
+    ],
+)
+async def test_no_page_loads_anything_from_another_origin(signed_in, api_client, path):
     """A dashboard that loads third-party JavaScript is one compromised CDN away
-    from exfiltrating tenant data."""
-    response = await signed_in["client"].get("/")
-    for marker in ("http://", "cdn.", "googleapis", "unpkg", "jsdelivr", "<script src"):
-        assert marker not in response.text, f"external resource referenced: {marker}"
+    from exfiltrating tenant data.
+
+    This used to forbid the string "<script src" outright, which held while the
+    dashboard had no script at all. The live view needs one, so the test now
+    checks the property that string stood in for: every script is served from
+    this origin, and none is inline.
+    """
+    import re
+
+    await _with_an_app(signed_in, api_client, f"Res {path}", f"com.example.res{abs(hash(path))}")
+    response = await signed_in["client"].get(path)
+    text = response.text
+    # Only what the page *loads* matters — src and href — not text it displays.
+    # The live view shows a curl example containing the tracking domain, which
+    # is text, not a resource.
+    for attribute in re.findall(r'(?:src|href)="([^"]*)"', text):
+        assert not attribute.startswith(("http://", "https://", "//")), (
+            f"{path} loads from another origin: {attribute}"
+        )
+
+    for tag in re.findall(r"<script\b[^>]*>", text):
+        source = re.search(r'src="([^"]+)"', tag)
+        assert source, f"inline script on {path}: {tag}"
+        assert source.group(1).startswith("/static/"), f"script from elsewhere: {tag}"
+    assert not re.search(r"<script\b[^>]*>\s*(?!</script>)\S", text), (
+        f"inline script body on {path}"
+    )
 
 
 async def test_api_errors_keep_the_navigation(signed_in, monkeypatch):
@@ -971,3 +1010,89 @@ async def test_a_secret_is_sent_as_a_credential_never_as_configuration(signed_in
     assert body["credentials"] == {"api_token": "tok_secret"}
     assert "api_token" not in body["configuration"]
     assert body["configuration"] == {"endpoint": "https://example.com/x"}
+
+
+# --- live events ------------------------------------------------------------
+async def test_the_live_page_hands_its_script_configuration_as_data(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Live Dash", "com.example.livedash")
+    response = await signed_in["client"].get(f"/live?app_id={app['id']}")
+    assert response.status_code == 200
+    assert f'data-app-id="{app["id"]}"' in response.text
+    assert '<script src="/static/live.js" defer></script>' in response.text
+    assert "Live events" in response.text
+
+
+async def test_the_policy_allows_script_from_this_origin_only(signed_in):
+    """The narrowest change that lets the live view exist. 'self' permits a file
+    this service serves; it never permits inline script or another host."""
+    policy = (await signed_in["client"].get("/")).headers["content-security-policy"]
+    directives = dict(
+        part.strip().split(" ", 1) for part in policy.split(";") if " " in part.strip()
+    )
+    assert directives["script-src"] == "'self'"
+    assert directives["connect-src"] == "'self'", "the script can talk to this origin only"
+    assert "unsafe-inline" not in directives["script-src"]
+    assert "unsafe-eval" not in policy
+    assert directives["default-src"] == "'none'"
+
+
+async def test_the_script_is_served_as_javascript(signed_in):
+    response = await signed_in["client"].get("/static/live.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_the_live_script_never_turns_event_data_into_markup():
+    """Events can be sent by anyone holding an SDK key, and the key ships inside
+    every copy of the app. An event name is attacker-controlled text, so the
+    script must never hand it to anything that parses HTML."""
+    import re
+    from pathlib import Path
+
+    source = Path("services/web/src/mmp_web/static/live.js").read_text()
+    code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("//"))
+    for sink in (
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+        "new Function",
+        'setTimeout("',
+        "createContextualFragment",
+    ):
+        assert sink not in code, f"live.js uses {sink}"
+    assert re.search(r"textContent\s*=", code), "values should reach the page as text"
+
+
+async def test_the_feed_answers_an_expired_session_with_json_not_a_redirect(web):
+    """Fetched by script. A 303 to the login form would arrive as a success the
+    script cannot parse, and it would spin instead of saying the session ended."""
+    response = await web.get("/live/feed?app_id=x", follow_redirects=False)
+    assert response.status_code == 401
+    assert response.json() == {"error": "session_expired"}
+
+
+async def test_the_feed_proxies_the_api_as_the_signed_in_user(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Feed", "com.example.feedproxy")
+    response = await signed_in["client"].get(f"/live/feed?app_id={app['id']}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "items" in body and "server_time" in body
+    assert response.headers["cache-control"] == "no-store"
+
+
+async def test_the_feed_passes_through_only_the_parameters_it_understands(signed_in, monkeypatch):
+    from mmp_web import app as web_app
+
+    requested: list[str] = []
+
+    async def capture(self, path, **kwargs):
+        requested.append(path)
+        return {"items": [], "server_time": "2026-09-15T00:00:00+00:00"}
+
+    monkeypatch.setattr(web_app.ApiClient, "get", capture)
+    await signed_in["client"].get("/live/feed?app_id=a&since=b&role=owner&org=other")
+    assert requested and "role" not in requested[-1] and "org" not in requested[-1]
+    assert "app_id=a" in requested[-1] and "since=b" in requested[-1]

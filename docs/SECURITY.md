@@ -374,6 +374,22 @@ Security issues should go to the platform team directly rather than through a
 public issue. This section needs a real address before the platform is exposed to
 anyone outside the company.
 
+
+### The dashboard's one script
+
+The dashboard's content-security policy was `default-src 'none'` with no script
+source at all. The live view needs polling, so it now allows `script-src 'self'`
+and `connect-src 'self'`: a file this service serves, fetching from this origin.
+No inline script, no `unsafe-eval`, no other host — the property the policy
+exists for, that no third party can run code against tenant data, still holds.
+Tests assert the directives, that every page's scripts are same-origin, and that
+the script never passes feed data to an HTML sink.
+
+The live feed never returns device or IP hashes, reduces postback URLs to their
+host (partner tokens live in query strings), and checks app ownership explicitly
+before reading rejections from Redis, which has no tenant boundary of its own.
+Rejections store our message about a request, never its body.
+
 ### Key rotation
 
 Every table holding a wrapped data key records the master key version that

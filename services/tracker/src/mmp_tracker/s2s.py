@@ -35,6 +35,7 @@ from mmp_crypto.signing import (
     nonce_for,
     verify,
 )
+from mmp_ingest.live import record_rejection
 from mmp_ingest.schema import (
     MAX_EVENTS_PER_BATCH,
     EventBatch,
@@ -90,16 +91,33 @@ async def ingest_s2s(request: Request) -> Response:
         # one here would give anyone who unpacked the APK the ability to
         # fabricate purchases.
         log.warning("s2s_rejected_sdk_key", app_id=auth.app_id)
+        # The single most common server-to-server mistake. The response stays a
+        # bare 401 for the caller; the live view is where the reason goes.
+        await _note(
+            state,
+            auth.app_id,
+            401,
+            "sdk_key_on_s2s",
+            "an sdk key was sent to the server-to-server endpoint; issue an s2s key",
+        )
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     try:
         body = await _read_body(request, state)
     except ValidationFailure as exc:
+        await _note(state, auth.app_id, 413, "payload_too_large", exc.reason)
         return JSONResponse({"error": "invalid_payload", "detail": exc.reason}, status_code=413)
 
     signature = request.headers.get(SIGNATURE_HEADER)
     timestamp = request.headers.get(TIMESTAMP_HEADER)
     if not signature or not timestamp:
+        await _note(
+            state,
+            auth.app_id,
+            401,
+            "signature_required",
+            f"{SIGNATURE_HEADER} and {TIMESTAMP_HEADER} headers are required",
+        )
         return JSONResponse(
             {
                 "error": "signature_required",
@@ -123,6 +141,17 @@ async def ingest_s2s(request: Request) -> Response:
             now=started,
         )
     except SignatureError:
+        # A fixed message, never the exception text: this is written somewhere a
+        # dashboard user can read, and nothing about a signature check should
+        # hint at what the correct value was.
+        await _note(
+            state,
+            auth.app_id,
+            401,
+            "invalid_signature",
+            "signature did not verify — check the canonical string covers method, "
+            "path, timestamp and body digest, and that the timestamp is current",
+        )
         return JSONResponse({"error": "invalid_signature"}, status_code=401)
 
     # Signature verified — now make sure this exact request has not been seen.
@@ -137,16 +166,32 @@ async def ingest_s2s(request: Request) -> Response:
     if not fresh:
         log.warning("s2s_replay_rejected", app_id=auth.app_id)
         observe_rejection("replayed")
+        await _note(
+            state,
+            auth.app_id,
+            409,
+            "replayed",
+            "this exact signed request was already accepted; sign each request afresh",
+        )
         return JSONResponse({"error": "replayed_request"}, status_code=409)
 
     try:
         batch = _batch_decoder.decode(body)
     except msgspec.DecodeError as exc:
+        await _note(state, auth.app_id, 400, "invalid_json", str(exc))
         return JSONResponse({"error": "invalid_json", "detail": str(exc)}, status_code=400)
 
     if not batch.events:
         return JSONResponse({"accepted": 0, "duplicates": 0}, status_code=202)
     if len(batch.events) > MAX_EVENTS_PER_BATCH:
+        await _note(
+            state,
+            auth.app_id,
+            413,
+            "batch_too_large",
+            f"at most {MAX_EVENTS_PER_BATCH} events per request",
+            len(batch.events),
+        )
         return JSONResponse({"error": "batch_too_large"}, status_code=413)
 
     organization_id = uuid.UUID(auth.organization_id)
@@ -173,6 +218,7 @@ async def ingest_s2s(request: Request) -> Response:
             event.ip_hash = None
             queued.append(event)
     except ValidationFailure as exc:
+        await _note(state, auth.app_id, 422, "invalid_event", str(exc), len(batch.events))
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
     event_ids = [event.event_id for event in queued]
@@ -193,4 +239,23 @@ async def ingest_s2s(request: Request) -> Response:
     return JSONResponse(
         {"accepted": len(accepted) - dropped, "duplicates": duplicates, "dropped": dropped},
         status_code=202,
+    )
+
+
+async def _note(
+    state: object,
+    app_id: str,
+    status: int,
+    reason: str,
+    detail: str,
+    events_in_batch: int | None = None,
+) -> None:
+    await record_rejection(
+        state.redis,  # type: ignore[attr-defined]
+        app_id,
+        status=status,
+        reason=reason,
+        detail=detail,
+        events_in_batch=events_in_batch,
+        source="s2s",
     )

@@ -510,7 +510,7 @@
           "apps"
         ],
         "summary": "Disable App",
-        "description": "Disable, never delete.\n\nDeleting an app would cascade to its campaigns and attribution history \u2014\nnumbers a client may have already reported to an ad network. Disabling stops\ningestion and leaves the record intact.",
+        "description": "Disable, never delete.\n\nDeleting an app would cascade to its campaigns and attribution history \u2014\nnumbers a client may have already reported to an ad network. Disabling stops\ningestion and leaves the record intact.\n\n\"Stops ingestion\" has to be true now rather than eventually. The tracker\nauthenticates against a cached key record that carries the app's status, so\nwithout clearing those entries a disabled app kept accepting events for up\nto ten minutes \u2014 and its links kept redirecting until the link cache was\ntold, which is what the notification below is for.",
         "operationId": "disable_app_v1_apps__app_id__delete",
         "parameters": [
           {
@@ -646,7 +646,7 @@
           "api-keys"
         ],
         "summary": "Rotate Key",
-        "description": "Issue a replacement key and revoke the old one.\n\nRotation creates the new key *before* revoking the old one so that the\ncaller never holds zero working credentials. Overlap is the point: an app\nwith a live SDK cannot swap credentials atomically.",
+        "description": "Issue a replacement key and revoke the old one.\n\nThe new key is created before the old one is revoked, inside a transaction,\nso the caller never holds zero working credentials at any instant.\n\nThat is the only overlap there is. The old key stops working immediately \u2014\nthe database says revoked and the tracker's cache is cleared to match, the\nsame as an outright revocation, because rotation is usually done for the\nsame reason. This used to leave the old key live for up to ten minutes: the\nrow said revoked and the cache had not been told, so the grace period was an\naccident of a TTL rather than anything anyone chose.\n\nA genuine timed overlap \u2014 old key valid until a stated moment \u2014 would be a\n`revoke_at` column and a deliberate feature, not a stale cache.",
         "operationId": "rotate_key_v1_apps__app_id__keys__key_id__rotate_post",
         "parameters": [
           {
@@ -2962,6 +2962,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkanSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/live": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "Live Feed",
+        "description": "Recent activity for one app, newest first.\n\nPoll with the ``server_time`` from the previous response as ``since``. Each\npoll deliberately re-reads the minute before it (see ``LATE_WRITE_MARGIN``),\nso items repeat across polls: de-duplicate on ``kind`` and ``id``, and expect\nan occasional item older than the newest one already shown.",
+        "operationId": "live_feed_v1_live_get",
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Live Feed V1 Live Get"
                 }
               }
             }

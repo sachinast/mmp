@@ -46,6 +46,10 @@ The judgment calls worth knowing:
   works with is commercially sensitive even without the credentials.
 - **Fraud findings are `member`.** They are operational information the people
   running campaigns need.
+- **Live events are `member`.** Raw per-device events with their properties are
+  operational data for people integrating, not a report; a viewer reads
+  aggregates. The feed also checks app ownership explicitly, because its
+  rejections come from Redis, which row-level security does not cover.
 - **Deep link creation is `admin`**, reading is `member`. A destination is
   opened by an app on someone's phone.
 

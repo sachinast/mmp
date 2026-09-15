@@ -54,6 +54,7 @@ TITLES = {
     "deeplinks": "Deep links",
     "exports": "Data export",
     "skadnetwork": "SKAdNetwork",
+    "live": "Live events",
     "ops": "Operations",
 }
 ORDER = list(TITLES)
