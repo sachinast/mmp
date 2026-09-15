@@ -102,6 +102,13 @@ jobs:
           # 21, not the 25 Android Studio bundles: Gradle cannot run on 25.
           java-version: "21"
       - uses: android-actions/setup-android@v3
+        with:
+          # Named explicitly. The action's default is "tools platform-tools", and
+          # Google has since removed the long-deprecated `tools` package from its
+          # repository — so the default install began failing with "Failed to
+          # find package 'tools'" on an unchanged workflow. The build needs
+          # platform-tools; Gradle fetches the platform and build tools it wants.
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
 
       # MMP_REQUIRE_ANDROID turns the target's "skipped" into a failure. Without
