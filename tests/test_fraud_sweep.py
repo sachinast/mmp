@@ -88,8 +88,14 @@ async def test_prompt_traffic_produces_no_findings(owner_conn, seeded_app):
     finally:
         await database.close()
 
-    assert result.links_examined == 1
-    assert result.findings_written == 0, "healthy traffic must not be accused of anything"
+    # Scoped to this app, like _findings. Both of these were global — "exactly one
+    # link examined, nothing written" — which held only while no other test left
+    # an attribution inside the last seven days. The first test to do so broke
+    # them without touching anything they test.
+    assert result.links_examined >= 1, "the seeded link should have been examined"
+    assert await _findings(owner_conn, seeded_app) == 0, (
+        "healthy traffic must not be accused of anything"
+    )
 
 
 async def test_the_statistics_are_not_inflated_by_the_joins(owner_conn, seeded_app):
@@ -112,7 +118,9 @@ async def test_the_statistics_are_not_inflated_by_the_joins(owner_conn, seeded_a
         ip_hashes=ips,
     )
 
-    row = await owner_conn.fetchrow(STATS_SQL, now - dt.timedelta(days=7), now, LATE)
+    rows = await owner_conn.fetch(STATS_SQL, now - dt.timedelta(days=7), now, LATE)
+    # This link's row, not whichever row came first: the query spans every tenant.
+    row = next(r for r in rows if r["tracking_link_id"] == seeded_app["tracking_link_id"])
     assert row["attributed_installs"] == 60, "the join must not multiply the install count"
     assert row["late_installs"] == 0
     assert row["max_installs_per_device"] == 12, "60 installs across 5 devices"

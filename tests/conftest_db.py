@@ -50,7 +50,29 @@ async def _database_available() -> bool:
 
 @pytest_asyncio.fixture(scope="session")
 async def db_available() -> bool:
-    return await _database_available()
+    available = await _database_available()
+    if available:
+        await _ensure_todays_partitions()
+    return available
+
+
+async def _ensure_todays_partitions() -> None:
+    """Create today's partitions before anything writes an event.
+
+    In production the worker does this hourly, days ahead. The test database has
+    no worker, so its partitions stopped wherever its last migration left them —
+    and a suite run a few days later failed with "no partition of relation
+    events found for row" on tests that had nothing to do with partitioning.
+    CI never saw it because CI migrates a fresh database every run. A test suite
+    that passes or fails depending on the calendar is not testing the code.
+    """
+    from mmp_db.maintenance import ensure_partitions
+
+    conn = await asyncpg.connect(owner_dsn())
+    try:
+        await ensure_partitions(conn)
+    finally:
+        await conn.close()
 
 
 @pytest_asyncio.fixture
