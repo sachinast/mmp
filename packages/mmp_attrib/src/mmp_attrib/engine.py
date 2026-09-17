@@ -80,6 +80,13 @@ class Click:
     # rides along so the attribution can carry it — see the deferred deep link
     # migration for why the copy is worth making.
     deep_link: str | None = None
+    # Whatever the partner appended to the tracking link, typically its own click
+    # id in sub1. Carried onto the attribution so a postback days later — for a
+    # purchase, resolved through the attribution rather than the click — can
+    # still hand it back to the partner that sent it.
+    sub1: str | None = None
+    sub2: str | None = None
+    sub3: str | None = None
 
 
 @dataclass(frozen=True)

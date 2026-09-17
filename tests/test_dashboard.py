@@ -1096,3 +1096,93 @@ async def test_the_feed_passes_through_only_the_parameters_it_understands(signed
     await signed_in["client"].get("/live/feed?app_id=a&since=b&role=owner&org=other")
     assert requested and "role" not in requested[-1] and "org" not in requested[-1]
     assert "app_id=a" in requested[-1] and "since=b" in requested[-1]
+
+
+# --- postbacks ----------------------------------------------------------------
+async def test_the_postbacks_page_lists_campaigns_and_the_sub_variables(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Pb Dash", "com.example.pbdash")
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    await web.post(
+        "/campaigns",
+        data={"csrf_token": csrf, "app_id": app["id"], "name": "Partner A", "source": "partner_a"},
+    )
+    page = await web.get(f"/postbacks?app_id={app['id']}")
+    assert page.status_code == 200
+    assert "Partner A" in page.text
+    assert "{{sub1}}" in page.text, "the placeholder is shown literally, not rendered by Jinja"
+    assert "campaign only" in page.text
+
+
+async def test_an_app_wide_sub1_rule_is_refused_with_the_apis_reason(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Pb Refuse", "com.example.pbrefuse")
+    web = signed_in["client"]
+    response = await web.post(
+        "/postbacks",
+        data={
+            "csrf_token": web.cookies.get("mmp_csrf"),
+            "app_id": app["id"],
+            "name": "Leaky",
+            "trigger_event": "install",
+            "url_template": "https://example.com/pb?clickid={{sub1}}",
+            "campaign_id": "",
+            "requires_attribution": "1",
+        },
+        follow_redirects=True,
+    )
+    assert "scoped to one campaign" in response.text
+    assert "Leaky" not in response.text.split("</form>")[-1], "no rule was created"
+
+
+async def test_a_scoped_sub1_rule_is_created_from_the_dashboard(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Pb Create", "com.example.pbcreate")
+    web = signed_in["client"]
+    csrf = web.cookies.get("mmp_csrf")
+    await web.post(
+        "/campaigns",
+        data={"csrf_token": csrf, "app_id": app["id"], "name": "Partner A", "source": "partner_a"},
+    )
+    campaigns = (await api_client.get(f"/v1/campaigns?app_id={app['id']}")).json()
+    response = await web.post(
+        "/postbacks",
+        data={
+            "csrf_token": csrf,
+            "app_id": app["id"],
+            "name": "Partner A installs",
+            "trigger_event": "install",
+            "url_template": "https://example.com/pb?clickid={{sub1}}",
+            "campaign_id": campaigns[0]["id"],
+            "requires_attribution": "1",
+        },
+        follow_redirects=True,
+    )
+    assert "Created Partner A installs" in response.text
+    table = response.text.split("<table>")[-1]
+    assert "Partner A installs" in table and "every campaign" not in table
+
+
+async def test_an_unticked_checkbox_means_false(signed_in, monkeypatch):
+    """A browser omits an unticked checkbox entirely; the handler must not treat
+    "absent" as "true"."""
+    from mmp_web import app as web_app
+
+    sent: list[dict] = []
+
+    async def capture(self, path, **kwargs):
+        sent.append(kwargs.get("json") or {})
+        return {}
+
+    monkeypatch.setattr(web_app.ApiClient, "post", capture)
+    web = signed_in["client"]
+    await web.post(
+        "/postbacks",
+        data={
+            "csrf_token": web.cookies.get("mmp_csrf"),
+            "app_id": "a",
+            "name": "n",
+            "trigger_event": "install",
+            "url_template": "https://example.com/x",
+        },
+    )
+    assert sent and sent[0]["requires_attribution"] is False
+    assert sent[0]["is_sandbox"] is False, "sandbox is broken and must not be sent as on"

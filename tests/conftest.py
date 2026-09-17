@@ -17,4 +17,5 @@ pytest_plugins = [
     "tests.conftest_api",
     "tests.conftest_ingest",
     "tests.conftest_web",
+    "tests.conftest_network",
 ]

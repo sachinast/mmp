@@ -81,6 +81,12 @@ class PostbackRule(Base, OrgScopedMixin, TimestampMixin):
     provider_integration_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("provider_integrations.id", ondelete="SET NULL")
     )
+    # Set: the rule fires only for installs attributed to this campaign, and may
+    # use the sub parameters. Unset: every install of the app, and sub parameters
+    # are refused, since they would carry one partner's click ids to another.
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     trigger_event: Mapped[str] = mapped_column(String(120), nullable=False)
     method: Mapped[str] = mapped_column(String(4), nullable=False, default="GET")

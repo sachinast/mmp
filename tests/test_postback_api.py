@@ -283,3 +283,102 @@ async def test_rule_headers_sealed_after_a_rotation_can_still_be_listed(account,
 
     listing = await account.client.get("/v1/postback-rules")
     assert listing.json()[0]["header_names"] == ["Authorization"]
+
+
+# --- partner sub parameters and campaign scope -------------------------------
+async def _campaign(account, app, name="Partner A"):
+    response = await account.post(
+        "/v1/campaigns",
+        json={"app_id": app["id"], "name": name, "source": name.lower().replace(" ", "_")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def test_sub_parameters_are_refused_in_an_app_wide_rule(account):
+    """sub1 is typically a partner's own click id. An app-wide rule fires for
+    every partner's installs, so it would send one partner's ids to another."""
+    app = await _app(account, package="com.example.subunscoped")
+    response = await _rule(account, app, url_template="https://example.com/pb?clickid={{sub1}}")
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "{{sub1}}" in detail and "scoped to one campaign" in detail
+
+
+async def test_sub_parameters_are_refused_in_the_body_too(account):
+    app = await _app(account, package="com.example.subbody")
+    response = await _rule(
+        account,
+        app,
+        method="POST",
+        url_template="https://example.com/pb",
+        body_template='{"click": "{{sub2}}"}',
+    )
+    assert response.status_code == 422
+    assert "{{sub2}}" in response.json()["detail"]
+
+
+async def test_a_campaign_scoped_rule_may_use_them(account):
+    app = await _app(account, package="com.example.subscoped")
+    campaign = await _campaign(account, app)
+    response = await _rule(
+        account,
+        app,
+        campaign_id=campaign["id"],
+        url_template="https://example.com/pb?clickid={{sub1}}&pub={{sub2}}",
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["campaign_id"] == campaign["id"]
+
+
+async def test_a_campaign_from_another_app_is_refused(account):
+    app = await _app(account, package="com.example.subapp1")
+    other = await _app(account, name="Other", package="com.example.subapp2")
+    foreign = await _campaign(account, other, name="Elsewhere")
+    response = await _rule(
+        account, app, campaign_id=foreign["id"], url_template="https://example.com/pb"
+    )
+    assert response.status_code == 422
+    assert "campaign not found" in response.json()["detail"]
+
+
+async def test_widening_a_sub_rule_to_every_campaign_is_refused(account):
+    """The unscoped case arrived at in two steps: create scoped, then clear the
+    campaign. The update validates the rule as it will be, not as it was."""
+    app = await _app(account, package="com.example.subwiden")
+    campaign = await _campaign(account, app)
+    created = await _rule(
+        account,
+        app,
+        campaign_id=campaign["id"],
+        url_template="https://example.com/pb?clickid={{sub1}}",
+    )
+    assert created.status_code == 201, created.text
+
+    widened = await account.patch(
+        f"/v1/postback-rules/{created.json()['id']}", json={"campaign_id": None}
+    )
+    assert widened.status_code == 422
+    assert "scoped to one campaign" in widened.json()["detail"]
+
+
+async def test_the_variables_endpoint_names_the_scoped_ones(account):
+    response = await account.client.get("/v1/postback-rules/variables")
+    assert response.status_code == 200
+    body = response.json()
+    assert {"sub1", "sub2", "sub3", "click_id"} <= set(body["variables"])
+    assert body["campaign_scoped_only"] == ["sub1", "sub2", "sub3"]
+
+
+async def test_the_preview_shows_what_sub1_will_look_like(account):
+    app = await _app(account, package="com.example.subpreview")
+    campaign = await _campaign(account, app)
+    created = await _rule(
+        account,
+        app,
+        campaign_id=campaign["id"],
+        url_template="https://example.com/pb?clickid={{sub1}}",
+    )
+    preview = await account.client.get(f"/v1/postback-rules/{created.json()['id']}/preview")
+    assert preview.status_code == 200
+    assert "clickid=partner-click-" in preview.json()["url"]

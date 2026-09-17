@@ -15,6 +15,7 @@ campaign reporting the customer is paying us to produce.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import asyncpg
@@ -26,14 +27,15 @@ from mmp_db.jsonfields import decode as decode_json
 from mmp_db.jsonfields import decode_list
 from mmp_db.pool import Database
 from mmp_db.types import DbConn
-from mmp_ingest.schema import QueuedEvent
-from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
+from mmp_ingest.schema import QueuedEvent, canonical_event_name
+from mmp_ingest.stream import ATTRIBUTED_INSTALLS_STREAM, EVENTS_STREAM, StreamConsumer
 from mmp_providers.base import PreparedRequest, Provider, ProviderConfig
 from mmp_providers.delivery import DeliveryResult, claim, record, send
 from mmp_providers.templates import render, variables_from
 from redis.asyncio import Redis
 
 from mmp_providers import registry
+from mmp_worker.attribution import INSTALL_EVENTS
 
 log = get_logger(__name__)
 
@@ -41,7 +43,7 @@ POSTBACK_GROUP = "postback-sender"
 
 RULES_SQL = """
 SELECT r.id, r.method, r.url_template, r.body_template, r.success_status_codes,
-       r.requires_attribution, r.is_sandbox, r.organization_id,
+       r.requires_attribution, r.is_sandbox, r.organization_id, r.campaign_id,
        i.provider, i.credentials_ciphertext, i.credentials_nonce, i.wrapped_dek,
        -- Aliased: postback_rules carries a key_version of its own now, and two
        -- columns of the same name in one row is a bug waiting for whichever
@@ -67,6 +69,7 @@ class PostbackMetrics:
     delivered: int = 0
     failed: int = 0
     skipped_unattributed: int = 0
+    skipped_other_campaign: int = 0
     skipped_unmapped: int = 0
     blocked: int = 0
     by_status: dict[str, int] = field(default_factory=dict)
@@ -77,6 +80,7 @@ class PostbackMetrics:
             "delivered": self.delivered,
             "failed": self.failed,
             "skipped_unattributed": self.skipped_unattributed,
+            "skipped_other_campaign": self.skipped_other_campaign,
             "skipped_unmapped": self.skipped_unmapped,
             "blocked": self.blocked,
             "by_status": dict(self.by_status),
@@ -110,11 +114,21 @@ class PostbackConsumer:
             consumer=consumer_name,
             decoder_type=QueuedEvent,
         )
+        # Installs arrive here only after their attribution is committed; see
+        # ATTRIBUTED_INSTALLS_STREAM for the race this replaces.
+        self._installs: StreamConsumer[QueuedEvent] = StreamConsumer(
+            redis,
+            stream=ATTRIBUTED_INSTALLS_STREAM,
+            group=POSTBACK_GROUP,
+            consumer=consumer_name,
+            decoder_type=QueuedEvent,
+        )
         self.metrics = PostbackMetrics()
         self._stopping = False
 
     async def start(self) -> None:
         await self._consumer.ensure_group()
+        await self._installs.ensure_group()
 
     async def stop(self) -> None:
         self._stopping = True
@@ -131,22 +145,43 @@ class PostbackConsumer:
         log.info("postback_consumer_drained", **self.metrics.as_dict())
 
     async def run_once(self) -> int:
-        messages = await self._consumer.read(count=self._batch_size)
-        if not messages:
+        events = await self._consumer.read(count=self._batch_size)
+        installs = await self._installs.read(count=self._batch_size)
+        if not events and not installs:
             return 0
 
+        # Installs on the raw stream are acknowledged without being handled: the
+        # same install arrives on the attributed stream once its attribution
+        # exists, and handling it here as well is exactly the race that stream
+        # removes.
+        await self._process(
+            self._consumer,
+            events,
+            skip=lambda event: canonical_event_name(event.event_name) in INSTALL_EVENTS,
+        )
+        await self._process(self._installs, installs, skip=None)
+        return len(events) + len(installs)
+
+    async def _process(
+        self,
+        consumer: StreamConsumer[QueuedEvent],
+        messages: list[tuple[str, QueuedEvent]],
+        *,
+        skip: Callable[[QueuedEvent], bool] | None,
+    ) -> None:
         acked: list[str] = []
         for message_id, event in messages:
+            if skip is not None and skip(event):
+                acked.append(message_id)
+                continue
             try:
                 await self.handle(event)
                 acked.append(message_id)
             except Exception:
-                # Left unacknowledged for redelivery. The claim below makes a
-                # redelivery safe: whoever already sent this owns the row, and
-                # the retry finds it taken.
+                # Left unacknowledged. The delivery claim makes a redelivery safe:
+                # whoever already sent this owns the row, and a retry finds it taken.
                 log.exception("postback_handling_failed", event_id=event.event_id)
-        await self._consumer.ack(acked)
-        return len(messages)
+        await consumer.ack(acked)
 
     async def handle(self, event: QueuedEvent) -> None:
         app_id = uuid.UUID(event.app_id)
@@ -189,6 +224,12 @@ class PostbackConsumer:
                     "currency": event.currency,
                     "platform": event.platform,
                     "attribution_method": attribution.method if attribution else "organic",
+                    # What the partner put on its tracking link, returned so it can
+                    # match the conversion to its own click. Only a campaign-scoped
+                    # rule may use these — see _deliver.
+                    "sub1": attribution.sub1 if attribution else None,
+                    "sub2": attribution.sub2 if attribution else None,
+                    "sub3": attribution.sub3 if attribution else None,
                 }
             )
 
@@ -292,6 +333,20 @@ class PostbackConsumer:
             # Reporting an unattributed conversion to a network would credit it
             # for something it did not cause.
             self.metrics.skipped_unattributed += 1
+            return
+
+        scoped_to = rule["campaign_id"]
+        if scoped_to is not None and (
+            attribution is None or attribution.campaign_id != str(scoped_to)
+        ):
+            # A rule for one partner's campaign hears only about that campaign's
+            # installs. Before rules could be scoped, every rule fired for every
+            # install, so two partners each with a rule were told about each
+            # other's conversions — and, once sub1 was available, would have been
+            # handed each other's click ids. An organic install belongs to no
+            # campaign, so a scoped rule never fires for one, whatever
+            # requires_attribution says.
+            self.metrics.skipped_other_campaign += 1
             return
 
         delivery_id = uuid7()

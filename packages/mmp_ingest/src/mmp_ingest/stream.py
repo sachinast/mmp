@@ -29,6 +29,15 @@ log = get_logger(__name__)
 
 EVENTS_STREAM = "stream:events"
 CLICKS_STREAM = "stream:clicks"
+# Install events, re-published by the attribution worker once the attribution
+# they create has been committed. Install postbacks are sent from here rather
+# than from EVENTS_STREAM, because a postback for an install needs the
+# attribution that install produces — and two consumer groups reading the same
+# event race. The postback sender does less work, so it usually won: it looked up
+# an attribution that did not exist yet, skipped the rule as unattributed,
+# acknowledged the event, and never looked again. Nearly every install postback
+# was lost that way. Reading from here makes the ordering true by construction.
+ATTRIBUTED_INSTALLS_STREAM = "stream:attributed-installs"
 EVENTS_GROUP = "events-writer"
 CLICKS_GROUP = "clicks-writer"
 

@@ -31,14 +31,9 @@ from mmp_attrib.engine import Click
 # last-click only ever needs the most recent few.
 MAX_DEVICE_CANDIDATES = 50
 
-CLICK_COLUMNS = """
-    click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
-    deep_link, NULL::text AS source, NULL::text AS medium
-"""
-
 BY_CLICK_ID_SQL = """
 SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
-       deep_link
+       deep_link, sub1, sub2, sub3
 FROM clicks
 WHERE click_id = $1
   AND app_id = $2
@@ -48,7 +43,7 @@ WHERE click_id = $1
 
 BY_DEVICE_SQL = """
 SELECT click_id, clicked_at, campaign_id, tracking_link_id, device_hash, is_bot,
-       deep_link
+       deep_link, sub1, sub2, sub3
 FROM clicks
 WHERE app_id = $1
   AND device_hash = $2
@@ -68,6 +63,9 @@ def _to_click(row: object) -> Click:
         device_hash=bytes(row["device_hash"]) if row["device_hash"] else None,  # type: ignore[index]
         is_bot=row["is_bot"],  # type: ignore[index]
         deep_link=row["deep_link"],  # type: ignore[index]
+        sub1=row["sub1"],  # type: ignore[index]
+        sub2=row["sub2"],  # type: ignore[index]
+        sub3=row["sub3"],  # type: ignore[index]
     )
 
 

@@ -50,8 +50,18 @@ ALLOWED_VARIABLES: frozenset[str] = frozenset(
         "country",
         "attribution_method",
         "install_timestamp",
+        "sub1",
+        "sub2",
+        "sub3",
     }
 )
+
+# Values a partner put on its own tracking link — its click id, usually, in sub1.
+# Allowed because returning them is the whole point: a partner matches an install
+# to its click by the id it sent. Allowed only in a rule scoped to one campaign,
+# because they belong to whichever partner sent that click, and an app-wide rule
+# fires for every partner's installs. The API refuses the unscoped case.
+SUB_PARAMETERS: frozenset[str] = frozenset({"sub1", "sub2", "sub3"})
 
 # Deliberately strict: a name, nothing else. No dots, no brackets, no pipes, no
 # whitespace — the syntax of every template-injection payload starts with one of
@@ -107,6 +117,15 @@ def inspect(template: str) -> TemplateCheck:
         if not PLACEHOLDER.fullmatch(match.group(0))
     )
     return TemplateCheck(variables=found, unknown=found - ALLOWED_VARIABLES, malformed=malformed)
+
+
+def uses_sub_parameters(*templates: str | None) -> frozenset[str]:
+    """Which of sub1, sub2 and sub3 any of these templates reference."""
+    used: set[str] = set()
+    for template in templates:
+        if template:
+            used |= inspect(template).variables & SUB_PARAMETERS
+    return frozenset(used)
 
 
 def validate(template: str) -> None:

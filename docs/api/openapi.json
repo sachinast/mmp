@@ -1537,6 +1537,35 @@
         }
       }
     },
+    "/v1/postback-rules/variables": {
+      "get": {
+        "tags": [
+          "postbacks"
+        ],
+        "summary": "Postback Variables",
+        "description": "What a template may reference, so a form can list it from the source of\ntruth rather than from a copy that drifts.",
+        "operationId": "postback_variables_v1_postback_rules_variables_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object",
+                  "title": "Response Postback Variables V1 Postback Rules Variables Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/postback-rules/{rule_id}/preview": {
       "get": {
         "tags": [
@@ -5048,6 +5077,18 @@
             "type": "boolean",
             "title": "Is Sandbox",
             "default": false
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
           }
         },
         "type": "object",
@@ -5070,6 +5111,18 @@
             "type": "string",
             "format": "uuid",
             "title": "App Id"
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
           },
           "provider_integration_id": {
             "anyOf": [
@@ -5146,6 +5199,7 @@
         "required": [
           "id",
           "app_id",
+          "campaign_id",
           "provider_integration_id",
           "name",
           "trigger_event",
@@ -5260,6 +5314,18 @@
               }
             ],
             "title": "Enabled"
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
           }
         },
         "type": "object",

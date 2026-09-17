@@ -73,6 +73,15 @@ had to start doing so.
 it, an intermediary can cache the 302 and every click through that proxy reuses
 one click id.
 
+## Ordering between workers
+
+Consumer groups on the same stream run concurrently, with no ordering between
+them. Where one worker's output is another's input, the dependency is made
+explicit with a stream: the attribution worker republishes each install to
+`stream:attributed-installs` after committing its attribution, and the postback
+sender reads installs only from there. Relying on the attribution worker being
+faster was the bug this replaced.
+
 ## Storage
 
 - **PostgreSQL 16.** `events` and `clicks` are declaratively range-partitioned

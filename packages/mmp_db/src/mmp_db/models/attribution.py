@@ -69,6 +69,11 @@ class Attribution(Base, OrgScopedMixin, TimestampMixin):
     tracking_link_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     source: Mapped[str | None] = mapped_column(String(120))
     medium: Mapped[str | None] = mapped_column(String(120))
+    # The sub parameters of the click that earned this install — a partner's own
+    # click id, usually in sub1 — kept so a later postback can return them.
+    sub1: Mapped[str | None] = mapped_column(Text)
+    sub2: Mapped[str | None] = mapped_column(Text)
+    sub3: Mapped[str | None] = mapped_column(Text)
 
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     installed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)

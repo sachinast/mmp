@@ -26,7 +26,12 @@ from mmp_core.logging import get_logger
 from mmp_core.metrics import attributions, fraud_verdicts
 from mmp_db.pool import Database
 from mmp_ingest.schema import QueuedEvent, canonical_event_name
-from mmp_ingest.stream import EVENTS_STREAM, StreamConsumer
+from mmp_ingest.stream import (
+    ATTRIBUTED_INSTALLS_STREAM,
+    EVENTS_STREAM,
+    StreamConsumer,
+    StreamProducer,
+)
 from redis.asyncio import Redis
 
 from mmp_attrib import Install, Method, attribute, parse_referrer
@@ -107,6 +112,7 @@ class AttributionConsumer:
         # attribution window a customer changed has to start applying without
         # anyone restarting a worker.
         self._app_config: dict[uuid.UUID, tuple[tuple[uuid.UUID, int, int], dt.datetime]] = {}
+        self._attributed = StreamProducer(redis, stream=ATTRIBUTED_INSTALLS_STREAM)
         self.metrics = AttributionMetrics()
         self._stopping = False
 
@@ -278,6 +284,13 @@ class AttributionConsumer:
                 event_window_days=event_window,
                 assessment=assessment,
             )
+
+        # After the transaction above has committed, so the postback sender can
+        # always find what it is about to report. Published for organic installs
+        # too — an app-wide rule that does not require attribution still wants
+        # them — and again on a redelivered install: postback delivery claims are
+        # unique per rule and event, so a repeat cannot send twice.
+        await self._attributed.publish([event])
 
         self.metrics.processed += 1
         method = str(decision.method)

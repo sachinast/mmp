@@ -121,7 +121,12 @@
             <td>{{ link.name }}</td>
             {# Shown in full, because the whole point of this page is copying it
                somewhere else. #}
-            <td><code>{{ tracking_domain }}/c/{{ link.tracking_code }}</code></td>
+            <td>
+              <code>{{ tracking_domain }}/c/{{ link.tracking_code }}</code>
+              {# The form a partner actually needs: their own click id in sub1, so
+                 it comes back to them on the postback. #}
+              <div class="meta">For a partner: <code>{{ tracking_domain }}/c/{{ link.tracking_code }}?sub1=CLICK_ID&amp;sub2=PUBLISHER_ID</code></div>
+            </td>
             <td>
               {% if link.android_url %}<div class="meta">Android</div>{% endif %}
               {% if link.ios_url %}<div class="meta">iOS</div>{% endif %}

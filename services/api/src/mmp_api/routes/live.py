@@ -93,7 +93,7 @@ LIMIT $3
 
 INSTALLS_SQL = """
 SELECT a.id, a.attributed_at, a.installed_at, a.anonymous_id, a.method,
-       a.fraud_verdict, a.fraud_rules, a.deep_link, a.superseded_by,
+       a.fraud_verdict, a.fraud_rules, a.deep_link, a.superseded_by, a.sub1, a.sub2, a.sub3,
        cp.name AS campaign_name, l.name AS link_name
 FROM attributions a
 LEFT JOIN campaigns cp ON cp.id = a.campaign_id
@@ -249,6 +249,11 @@ async def live_feed(
                     "tracking_link": row["link_name"],
                     "deep_link": row["deep_link"],
                     "fraud_rules": decode_list(row["fraud_rules"]),
+                    # What the partner put on its link, so "did their click id
+                    # arrive" can be answered here, before any postback is sent.
+                    "sub1": row["sub1"],
+                    "sub2": row["sub2"],
+                    "sub3": row["sub3"],
                     "superseded": row["superseded_by"] is not None,
                 },
             }

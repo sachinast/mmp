@@ -136,7 +136,31 @@ Give the returned `https://track.example.com/c/{tracking_code}` to the network.
 Add `?dl=/product/123` for a deep link destination, or `?dl_code=summer` to name
 one you registered.
 
-## 6. Receive conversions
+## 6. Share links with partners
+
+Create a campaign per partner on **Tracking links**, then give the partner its
+link with their own click id appended:
+
+```
+https://<your tracking domain>/c/<code>?sub1={their_click_id}&sub2={their_publisher_id}
+```
+
+The partner replaces the braces with their own macros. `sub1`, `sub2` and `sub3`
+are stored on the install that click earns, so they are still there when a
+purchase arrives days later.
+
+On **Postbacks**, create a rule for that partner's campaign and return their
+click id with `{{sub1}}`:
+
+```
+https://partner.example/postback?clickid={{sub1}}&event={{event_name}}&payout={{revenue}}
+```
+
+`{{sub1}}`–`{{sub3}}` are refused in a rule for every campaign: they carry one
+partner's click ids, and an app-wide rule fires for every partner's installs.
+Watch deliveries arrive on **Live events**.
+
+## 7. Receive conversions
 
 **Postbacks** push to a network's URL when a rule matches. **Webhooks** push to
 *your* endpoint.
@@ -155,7 +179,7 @@ if not hmac.compare_digest(expected, request.headers["x-mmp-signature"]):
 
 Use `compare_digest`, not `==`.
 
-## 7. Check it arrived
+## 8. Check it arrived
 
 Open **Live events** in the dashboard before you send anything. Clicks, installs,
 events and postback deliveries appear within a few seconds of being stored —
@@ -168,7 +192,7 @@ with no currency, malformed JSON, an SDK key sent to the server-to-server
 endpoint, a signature that did not verify. One invalid event refuses the whole
 request, and the row says how many went with it.
 
-## 8. Read your data
+## 9. Read your data
 
 ```bash
 curl -G https://api.example.com/v1/analytics/overview \

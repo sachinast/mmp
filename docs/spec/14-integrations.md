@@ -61,6 +61,28 @@ inexpressible, which advertisers ask for constantly.
 The cost is that renaming one event means listing them all. That is visible in a
 configuration; silently sending an event someone tried to exclude is not.
 
+## Partner parameters and scope
+
+A partner appends its own identifiers to the tracking link as `sub1`–`sub3`. They
+are copied from the click onto the attribution when the install is matched, so a
+postback for a purchase days later can still return them.
+
+A postback rule may be scoped to one campaign, and must be to use them. Rules
+were once app-wide only, which meant two partners each with a rule were told
+about each other's installs — and returning `sub1` on top of that would have
+handed one partner's click ids to another. The API refuses a `{{sub1}}` template
+in an unscoped rule, including one arrived at by clearing a rule's campaign.
+
+## Install postbacks follow attribution
+
+Install postbacks are read from `stream:attributed-installs`, which the
+attribution worker publishes to after committing. They used to be read from the
+raw event stream, alongside the attribution worker, and the postback sender —
+doing less work — usually got there first: it found no attribution, skipped the
+rule as unattributed, acknowledged the event and never looked again. Nearly every
+install postback was lost. Found by running the partner flow on a live stack;
+every test had used a purchase, which happens after the attribution exists.
+
 ## Credentials
 
 Envelope-encrypted (AES-256-GCM, KMS-wrapped DEK, AAD bound to the

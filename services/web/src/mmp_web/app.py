@@ -56,6 +56,7 @@ NAV_ITEMS = [
     {"key": "attribution", "label": "Attribution", "href": "/attribution", "group": "Measure"},
     {"key": "fraud", "label": "Fraud", "href": "/fraud", "group": "Trust"},
     {"key": "skan", "label": "SKAdNetwork", "href": "/skan", "group": "Trust"},
+    {"key": "postbacks", "label": "Postbacks", "href": "/postbacks", "group": "Configure"},
     {"key": "deeplinks", "label": "Deep links", "href": "/deep-links", "group": "Configure"},
     {"key": "integrations", "label": "Integrations", "href": "/integrations", "group": "Configure"},
     {"key": "export", "label": "Export", "href": "/export", "group": "Configure"},
@@ -836,6 +837,106 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return await _error_page(request, api, "skan", "skan.html", exc)
 
     # --------------------------------------------------------- deep links
+    # ---------------------------------------------------------- postbacks
+    @app.get("/postbacks", response_class=HTMLResponse, include_in_schema=False)
+    async def postbacks_page(request: Request) -> Response:
+        api = client_for(request)
+        try:
+            context = await page_context(request, api, "postbacks")
+            apps, app_id, _from, _to = await selection(request, api)
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "rules": [],
+                "campaigns": [],
+                "variables": [],
+                "scoped_only": [],
+                "notice": request.query_params.get("notice"),
+                "error": None,
+            }
+            if app_id:
+                variables = await api.get("/v1/postback-rules/variables") or {}
+                campaigns = await api.get(f"/v1/campaigns?app_id={app_id}") or []
+                context |= {
+                    "rules": await api.get(f"/v1/postback-rules?app_id={app_id}") or [],
+                    "campaigns": campaigns,
+                    "campaign_names": {c["id"]: c["name"] for c in campaigns},
+                    "variables": variables.get("variables", []),
+                    "scoped_only": variables.get("campaign_scoped_only", []),
+                }
+            return render("postbacks.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "postbacks", "postbacks.html", exc)
+
+    @app.post("/postbacks", include_in_schema=False)
+    async def create_postback_action(
+        request: Request,
+        app_id: str = Form(...),
+        name: str = Form(...),
+        trigger_event: str = Form(...),
+        url_template: str = Form(...),
+        campaign_id: str = Form(""),
+        method: str = Form("GET"),
+        requires_attribution: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        back = f"/postbacks?{urlencode({'app_id': app_id})}"
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse(back, status_code=status.HTTP_303_SEE_OTHER)
+        body: dict[str, Any] = {
+            "app_id": app_id,
+            "name": name.strip(),
+            "trigger_event": trigger_event.strip(),
+            "url_template": url_template.strip(),
+            "method": "POST" if method == "POST" else "GET",
+            # An unticked checkbox is absent from a form post, not "false".
+            "requires_attribution": bool(requires_attribution),
+            # Not offered on the form: sandbox deliveries currently post to an
+            # internal endpoint that does not exist, so every one fails. Kept at
+            # false until that is fixed rather than advertised while broken.
+            "is_sandbox": False,
+        }
+        if campaign_id:
+            body["campaign_id"] = campaign_id
+        try:
+            await api.post("/v1/postback-rules", json=body)
+            return _app_notice("/postbacks", app_id, f"Created {name.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            # The API explains a refused {{sub1}} or an unreachable destination
+            # better than anything this layer could say.
+            return _app_notice("/postbacks", app_id, exc.detail)
+
+    @app.post("/postbacks/{rule_id}/toggle", include_in_schema=False)
+    async def toggle_postback_action(
+        request: Request,
+        rule_id: str,
+        app_id: str = Form(""),
+        enable: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/postbacks", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            if enable:
+                await api.patch(f"/v1/postback-rules/{rule_id}", json={"enabled": True})
+                return _app_notice("/postbacks", app_id, "Rule enabled")
+            await api.delete(f"/v1/postback-rules/{rule_id}")
+            return _app_notice("/postbacks", app_id, "Rule disabled")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _app_notice("/postbacks", app_id, exc.detail)
+
+    def _app_notice(path: str, app_id: str, message: str) -> RedirectResponse:
+        query = urlencode({"app_id": app_id, "notice": message})
+        return RedirectResponse(f"{path}?{query}", status_code=status.HTTP_303_SEE_OTHER)
+
     @app.get("/deep-links", response_class=HTMLResponse, include_in_schema=False)
     async def deep_links_page(request: Request) -> Response:
         api = client_for(request)
@@ -1090,6 +1191,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "notice": None,
             "new_key": None,
             "campaigns_for_links": [],
+            "rules": [],
+            "campaign_names": {},
+            "variables": [],
+            "scoped_only": [],
             "integrations": [],
             "providers": [],
             "datasets": EXPORT_DATASETS,

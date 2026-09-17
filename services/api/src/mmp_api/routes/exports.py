@@ -138,6 +138,12 @@ DATASETS: dict[str, Dataset] = {
             "fraud_score",
             "fraud_verdict",
             "deep_link",
+            # A partner's own click id and publisher, as it put them on the link.
+            # Exported because they are what a partner reconciles by — and what
+            # an advertiser needs in front of them when a partner disputes a count.
+            "sub1",
+            "sub2",
+            "sub3",
         ),
     ),
 }

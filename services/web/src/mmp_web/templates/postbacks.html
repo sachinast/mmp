@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Postbacks · MMP{% endblock %}
+{% block content %}
+<h1>Postbacks</h1>
+<p class="sub">
+  Tell a partner when an install or event they drove happens, by calling their URL.
+  Scope a rule to the partner's campaign so it only hears about installs that
+  partner earned.
+</p>
+
+<form class="inline card" method="get" style="margin-bottom:18px">
+  <div>
+    <label for="app_id">App</label>
+    <select id="app_id" name="app_id">
+      {% for app in apps %}
+        <option value="{{ app.id }}" {% if app.id == selected_app_id %}selected{% endif %}>{{ app.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="secondary">Show</button>
+</form>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% endif %}
+{% if notice %}
+  <div class="error" style="border-left-color: var(--accent)">
+    <strong style="color: var(--text)">{{ notice }}</strong>
+  </div>
+{% endif %}
+
+{% if not selected_app_id %}
+  <div class="card">
+    {% with title = "No apps yet", hint = "Create an app and a campaign first; a postback belongs to both." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="card" style="margin-bottom:18px">
+    <h2 style="margin-top:0">Add a postback</h2>
+    <form method="post" action="/postbacks">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+      <div class="inline">
+        <div>
+          <label for="pb-name">Name</label>
+          <input id="pb-name" name="name" required maxlength="255" placeholder="Partner A installs">
+        </div>
+        <div>
+          <label for="pb-campaign">Campaign</label>
+          <select id="pb-campaign" name="campaign_id">
+            {% for campaign in campaigns %}
+              <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+            {% endfor %}
+            <option value="">Every campaign (app-wide)</option>
+          </select>
+        </div>
+        <div>
+          <label for="pb-event">Fires on event</label>
+          <input id="pb-event" name="trigger_event" required list="pb-events" value="install" size="14">
+          <datalist id="pb-events">
+            <option value="install"><option value="purchase"><option value="signup"><option value="login">
+          </datalist>
+        </div>
+        <div>
+          <label for="pb-method">Method</label>
+          <select id="pb-method" name="method"><option>GET</option><option>POST</option></select>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label for="pb-url">Partner's postback URL</label>
+        <input id="pb-url" name="url_template" required maxlength="4096" style="width:100%"
+               placeholder="https://partner.example/postback?clickid={{ '{{' }}sub1{{ '}}' }}&amp;event={{ '{{' }}event_name{{ '}}' }}&amp;payout={{ '{{' }}revenue{{ '}}' }}">
+      </div>
+      <div class="inline" style="margin-top:10px">
+        <label><input type="checkbox" name="requires_attribution" value="1" checked> Only attributed conversions</label>
+        <button type="submit">Create postback</button>
+      </div>
+    </form>
+
+    <p class="meta" style="margin-top:12px">
+      <strong>Returning the partner's click id.</strong> Give the partner a link like
+      <code>/c/YOUR_CODE?sub1=THEIR_CLICK_ID</code> (they put their own macro in place
+      of <code>THEIR_CLICK_ID</code>), then use <code>{{ '{{' }}sub1{{ '}}' }}</code> here.
+      <code>{{ '{{' }}sub1{{ '}}' }}</code>, <code>{{ '{{' }}sub2{{ '}}' }}</code> and
+      <code>{{ '{{' }}sub3{{ '}}' }}</code> are only allowed in a rule for one campaign:
+      they carry one partner's click ids, and an app-wide rule would send them to
+      whichever partner it points at.
+    </p>
+    <p class="meta">
+      Available:
+      {% for variable in variables %}
+        <code>{{ '{{' ~ variable ~ '}}' }}</code>{% if variable in scoped_only %}<sup>campaign only</sup>{% endif %}
+      {% endfor %}
+    </p>
+  </div>
+
+  {% if not rules %}
+    <div class="card">
+      {% with title = "No postbacks yet",
+              hint = "Create one above. Deliveries appear on Live events within seconds." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Scope</th><th>Event</th><th>URL template</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for rule in rules %}
+            <tr>
+              <td>{{ rule.name }}{% if rule.is_sandbox %} <span class="pill">sandbox</span>{% endif %}</td>
+              <td>
+                {% if rule.campaign_id %}
+                  {{ campaign_names.get(rule.campaign_id, "campaign") }}
+                {% else %}
+                  {# Said plainly, because it is the setting that tells one partner
+                     about another partner's installs. #}
+                  <span class="pill">every campaign</span>
+                {% endif %}
+              </td>
+              <td><code>{{ rule.trigger_event }}</code></td>
+              <td style="word-break: break-all"><code>{{ rule.url_template }}</code></td>
+              <td><span class="pill {{ 'active' if rule.enabled else 'disabled' }}">{{ 'enabled' if rule.enabled else 'disabled' }}</span></td>
+              <td>
+                <form method="post" action="/postbacks/{{ rule.id }}/toggle">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+                  {% if not rule.enabled %}<input type="hidden" name="enable" value="1">{% endif %}
+                  <button type="submit" class="secondary">{{ 'Enable' if not rule.enabled else 'Disable' }}</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="meta">Check a rule is working on <a href="/live?app_id={{ selected_app_id }}">Live events</a>, where each delivery shows its status and the partner's HTTP response.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

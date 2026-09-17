@@ -42,11 +42,11 @@ INSERT INTO attributions (
     id, organization_id, app_id, install_key, anonymous_id, user_id,
     click_id, campaign_id, tracking_link_id, source, medium,
     method, installed_at, attributed_at, window_days, expires_at,
-    fraud_score, fraud_verdict, fraud_rules, deep_link,
+    fraud_score, fraud_verdict, fraud_rules, deep_link, sub1, sub2, sub3,
     created_at, updated_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $14, $15,
-        $16, $17, $18, $19,
+        $16, $17, $18, $19, $20, $21, $22,
         now(), now())
 ON CONFLICT DO NOTHING
 RETURNING id
@@ -54,7 +54,7 @@ RETURNING id
 
 CURRENT_SQL = """
 SELECT id, method, click_id, campaign_id, tracking_link_id, source, medium,
-       installed_at, attributed_at, window_days, expires_at, user_id
+       installed_at, attributed_at, window_days, expires_at, user_id, sub1, sub2, sub3
 FROM attributions
 WHERE app_id = $1 AND install_key = $2 AND superseded_by IS NULL
 """
@@ -70,6 +70,12 @@ class CachedAttribution(msgspec.Struct):
     method: str
     attributed_at: str
     expires_at: str
+    # Defaulted, so an entry cached before these existed still decodes — and
+    # resolves as "no sub parameters" rather than failing every postback for
+    # an install attributed before the upgrade.
+    sub1: str | None = None
+    sub2: str | None = None
+    sub3: str | None = None
 
 
 _encoder = msgspec.msgpack.Encoder()
@@ -167,6 +173,9 @@ async def record(
             str(assessment.verdict),
             json.dumps(assessment.rules) if assessment.signals else None,
             decision.click.deep_link if decision.click else None,
+            decision.click.sub1 if decision.click else None,
+            decision.click.sub2 if decision.click else None,
+            decision.click.sub3 if decision.click else None,
         )
 
     if inserted is None:
@@ -225,6 +234,9 @@ async def cache(
             method=str(decision.method),
             attributed_at=dt.datetime.now(dt.UTC).isoformat(),
             expires_at=expires_at.isoformat(),
+            sub1=decision.click.sub1 if decision.click else None,
+            sub2=decision.click.sub2 if decision.click else None,
+            sub3=decision.click.sub3 if decision.click else None,
         )
     )
     await redis.set(_cache_key(app_id, anonymous_id), payload, ex=ttl)
@@ -259,6 +271,9 @@ async def lookup(
         method=row["method"],
         attributed_at=row["attributed_at"].isoformat(),
         expires_at=row["expires_at"].isoformat(),
+        sub1=row["sub1"],
+        sub2=row["sub2"],
+        sub3=row["sub3"],
     )
     ttl = int((row["expires_at"] - dt.datetime.now(dt.UTC)).total_seconds())
     if ttl > 0:

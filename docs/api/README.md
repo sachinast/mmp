@@ -152,6 +152,18 @@ carrying the value of the `mmp_csrf` cookie.
 | `GET` | `/v1/skan/postbacks` | List Postbacks |
 | `GET` | `/v1/skan/summary` | Summarise |
 
+### Postback rules and partner parameters
+
+`POST /v1/postback-rules` accepts `campaign_id`. A scoped rule fires only for
+installs attributed to that campaign; an unscoped rule fires for every install of
+the app. `{{sub1}}`, `{{sub2}}` and `{{sub3}}` — the values a partner put on its
+tracking link — are allowed only in a scoped rule, and an unscoped rule using them
+is refused with 422. `GET /v1/postback-rules/variables` lists every variable and
+which are campaign-only.
+
+Install postbacks are sent after the install's attribution is committed, so
+`{{sub1}}` and `{{campaign_name}}` are always populated on them.
+
 ### Live events
 
 | Method | Path | Purpose |

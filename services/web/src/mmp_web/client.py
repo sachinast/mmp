@@ -128,6 +128,10 @@ class ApiClient:
                 raise ApiError(response.status_code, "export failed")
             yield response
 
+    async def patch(self, path: str, **kwargs: Any) -> Any:
+        data, _headers = await self.request("PATCH", path, **kwargs)
+        return data
+
     async def delete(self, path: str, **kwargs: Any) -> Any:
         data, _headers = await self.request("DELETE", path, **kwargs)
         return data

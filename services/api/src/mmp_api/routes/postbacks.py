@@ -29,7 +29,13 @@ from mmp_core.outbound import is_permitted
 from mmp_crypto.envelope import SealedSecret, open_sealed, organization_aad, seal
 from mmp_db.jsonfields import decode
 from mmp_db.types import DbConn
-from mmp_providers.templates import ALLOWED_VARIABLES, TemplateError, inspect
+from mmp_providers.templates import (
+    ALLOWED_VARIABLES,
+    SUB_PARAMETERS,
+    TemplateError,
+    inspect,
+    uses_sub_parameters,
+)
 from pydantic import BaseModel, Field, field_validator
 
 from mmp_api.context import AppContext
@@ -42,6 +48,7 @@ log = get_logger(__name__)
 RULE_COLUMNS = (
     "id",
     "app_id",
+    "campaign_id",
     "provider_integration_id",
     "name",
     "trigger_event",
@@ -70,6 +77,7 @@ DELIVERY_COLUMNS = (
 )
 RULE_UPDATABLE = (
     "name",
+    "campaign_id",
     "trigger_event",
     "method",
     "url_template",
@@ -101,6 +109,8 @@ class PostbackRuleCreate(BaseModel):
     success_status_codes: list[int] = Field(default_factory=lambda: [200, 201, 202, 204])
     requires_attribution: bool = True
     is_sandbox: bool = False
+    # One campaign's installs only. Required to use {{sub1}}, {{sub2}} or {{sub3}}.
+    campaign_id: uuid.UUID | None = None
 
     @field_validator("success_status_codes")
     @classmethod
@@ -140,6 +150,9 @@ class PostbackRuleUpdate(BaseModel):
     requires_attribution: bool | None = None
     is_sandbox: bool | None = None
     enabled: bool | None = None
+    # Explicitly null widens the rule to every install of the app — refused if
+    # its templates still use a sub parameter.
+    campaign_id: uuid.UUID | None = None
 
 
 class PostbackRuleOut(BaseModel):
@@ -152,6 +165,7 @@ class PostbackRuleOut(BaseModel):
 
     id: uuid.UUID
     app_id: uuid.UUID
+    campaign_id: uuid.UUID | None
     provider_integration_id: uuid.UUID | None
     name: str
     trigger_event: str
@@ -206,6 +220,41 @@ def _validate_templates(url_template: str, body_template: str | None) -> None:
                 )
     except TemplateError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+
+async def _validate_scope(
+    conn: DbConn,
+    *,
+    app_id: uuid.UUID,
+    campaign_id: uuid.UUID | None,
+    url_template: str,
+    body_template: str | None,
+) -> None:
+    """A rule may only use a partner's sub parameters if it is scoped to one campaign.
+
+    sub1 is typically a partner's own click id. An app-wide rule fires for every
+    install whichever partner earned it, so {{sub1}} in one would send partner
+    A's click ids to wherever partner B's rule points. Refused here, at save
+    time, with the reason — rather than discovered by a partner reading another
+    partner's ids in its logs.
+    """
+    if campaign_id is not None and not await conn.fetchval(
+        "SELECT 1 FROM campaigns WHERE id = $1 AND app_id = $2", campaign_id, app_id
+    ):
+        # Scoped by RLS too, so another tenant's campaign is equally "not found".
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "campaign not found for this app"
+        )
+
+    used = uses_sub_parameters(url_template, body_template)
+    if used and campaign_id is None:
+        names = ", ".join("{{" + name + "}}" for name in sorted(used))
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"{names} can only be used in a rule scoped to one campaign: they carry the "
+            "partner's own click ids, and a rule for every campaign would send them to "
+            "whichever partner it points at",
+        )
 
 
 def _validate_destination(url_template: str, *, is_sandbox: bool) -> None:
@@ -321,6 +370,13 @@ async def create_rule(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "app not found")
 
     _validate_templates(body.url_template, body.body_template)
+    await _validate_scope(
+        conn,
+        app_id=body.app_id,
+        campaign_id=body.campaign_id,
+        url_template=body.url_template,
+        body_template=body.body_template,
+    )
     _validate_destination(body.url_template, is_sandbox=body.is_sandbox)
 
     ciphertext, nonce, wrapped, key_version = _seal_headers(context, principal.org_id, body.headers)
@@ -331,9 +387,9 @@ async def create_rule(
                    id, organization_id, app_id, name, trigger_event, method,
                    url_template, body_template, headers_ciphertext, headers_nonce,
                    wrapped_dek, key_version, success_status_codes, requires_attribution,
-                   is_sandbox, enabled, created_at, updated_at)
+                   is_sandbox, campaign_id, enabled, created_at, updated_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                       $13, $14, $15, true, now(), now())""",
+                       $13, $14, $15, $16, true, now(), now())""",
             RULE_COLUMNS,
         ),
         rule_id,
@@ -352,6 +408,7 @@ async def create_rule(
         json.dumps(body.success_status_codes),
         body.requires_attribution,
         body.is_sandbox,
+        body.campaign_id,
     )
 
     log.info(
@@ -380,7 +437,8 @@ async def update_rule(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "nothing to update")
 
     existing = await conn.fetchrow(
-        "SELECT url_template, body_template, is_sandbox FROM postback_rules WHERE id = $1",
+        "SELECT app_id, campaign_id, url_template, body_template, is_sandbox"
+        " FROM postback_rules WHERE id = $1",
         rule_id,
     )
     if existing is None:
@@ -393,6 +451,15 @@ async def update_rule(
     body_template = changes.get("body_template", existing["body_template"])
     is_sandbox = changes.get("is_sandbox", existing["is_sandbox"])
     _validate_templates(url_template, body_template)
+    # The merged rule again: a patch that clears campaign_id on a rule whose
+    # template still says {{sub1}} is the unscoped case arrived at in two steps.
+    await _validate_scope(
+        conn,
+        app_id=existing["app_id"],
+        campaign_id=changes.get("campaign_id", existing["campaign_id"]),
+        url_template=url_template,
+        body_template=body_template,
+    )
     _validate_destination(url_template, is_sandbox=is_sandbox)
 
     row = await conn.fetchrow(
@@ -439,6 +506,18 @@ async def disable_rule(
     log.info("postback_rule_disabled", rule_id=str(rule_id), actor=str(principal.user_id))
 
 
+@router.get("/postback-rules/variables")
+async def postback_variables(
+    _principal: Annotated[Principal, Depends(require_role("viewer"))],
+) -> dict[str, list[str]]:
+    """What a template may reference, so a form can list it from the source of
+    truth rather than from a copy that drifts."""
+    return {
+        "variables": sorted(ALLOWED_VARIABLES),
+        "campaign_scoped_only": sorted(SUB_PARAMETERS),
+    }
+
+
 @router.get("/postback-rules/{rule_id}/preview")
 async def preview_rule(
     rule_id: uuid.UUID,
@@ -477,6 +556,9 @@ async def preview_rule(
         "country": "US",
         "attribution_method": "referrer",
         "install_timestamp": "2026-09-01T09:15:00+00:00",
+        "sub1": "partner-click-7f3a9c",
+        "sub2": "publisher-42",
+        "sub3": "creative-b",
     }
     check = inspect(row["url_template"])
     return TemplatePreview(
