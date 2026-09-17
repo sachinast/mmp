@@ -6,10 +6,11 @@ and attribution so that a slow write batch never delays a conversion reaching an
 ad network — networks optimise spend on these signals, and a late one is spend
 misallocated.
 
-Sandbox rules deliver to an internal echo endpoint instead of the real one. That
-is not a convenience: without it, the only way to test a postback configuration
-is to send a fabricated conversion to a live ad account, which corrupts the
-campaign reporting the customer is paying us to produce.
+Sandbox rules make no network call. The request that would have been sent is
+recorded instead, with status ``sandbox``. That is not a convenience: without it,
+the only way to test a postback configuration is to send a fabricated conversion
+to a live ad account, which corrupts the campaign reporting the customer is
+paying us to produce.
 """
 
 from __future__ import annotations
@@ -22,7 +23,13 @@ import asyncpg
 from mmp_attrib.store import CachedAttribution, lookup
 from mmp_core.ids import uuid7
 from mmp_core.logging import get_logger
-from mmp_crypto.envelope import MasterKeyProvider
+from mmp_crypto.envelope import (
+    MasterKeyProvider,
+    SealedSecret,
+    open_sealed,
+    organization_aad,
+    seal,
+)
 from mmp_db.jsonfields import decode as decode_json
 from mmp_db.jsonfields import decode_list
 from mmp_db.pool import Database
@@ -30,7 +37,14 @@ from mmp_db.types import DbConn
 from mmp_ingest.schema import QueuedEvent, canonical_event_name
 from mmp_ingest.stream import ATTRIBUTED_INSTALLS_STREAM, EVENTS_STREAM, StreamConsumer
 from mmp_providers.base import PreparedRequest, Provider, ProviderConfig
-from mmp_providers.delivery import DeliveryResult, claim, record, send
+from mmp_providers.delivery import (
+    DeliveryResult,
+    claim,
+    record,
+    record_sandbox,
+    remember_request,
+    send,
+)
 from mmp_providers.templates import render, variables_from
 from redis.asyncio import Redis
 
@@ -49,7 +63,13 @@ SELECT r.id, r.method, r.url_template, r.body_template, r.success_status_codes,
        -- columns of the same name in one row is a bug waiting for whichever
        -- one the driver happens to keep.
        i.key_version AS integration_key_version,
-       i.configuration
+       i.configuration,
+       -- The rule's own custom headers, also sealed and also aliased away from
+       -- the integration's columns of the same names.
+       r.headers_ciphertext AS rule_headers_ciphertext,
+       r.headers_nonce AS rule_headers_nonce,
+       r.wrapped_dek AS rule_wrapped_dek,
+       r.key_version AS rule_key_version
 FROM postback_rules r
 LEFT JOIN provider_integrations i ON i.id = r.provider_integration_id
                                  AND i.status = 'active'
@@ -58,9 +78,52 @@ WHERE r.app_id = $1 AND r.trigger_event = $2 AND r.enabled
 
 CAMPAIGN_NAME_SQL = "SELECT name, source, medium FROM campaigns WHERE id = $1"
 
-# Where a sandbox rule's traffic goes instead of the partner. Internal, so http
-# is acceptable and validated separately from customer-supplied destinations.
-SANDBOX_ENDPOINT = "http://127.0.0.1:8002/v1/internal/postback-echo"
+
+class CredentialsUnavailable(Exception):
+    """A request needs secrets this worker cannot open.
+
+    Raised rather than sending without them. A request missing its Authorization
+    header is refused by the partner at best; at worst it is accepted as coming
+    from nobody. Either way the delivery is recorded as blocked, with the reason,
+    instead of being lost.
+    """
+
+
+def _open_headers(
+    master_keys: MasterKeyProvider | None,
+    organization_id: object,
+    ciphertext: bytes | None,
+    nonce: bytes | None,
+    wrapped: bytes | None,
+    key_version: int | None,
+    *,
+    what: str,
+) -> dict[str, str]:
+    """Unseal a set of headers, or say plainly why they cannot be."""
+    import msgspec
+
+    if not ciphertext:
+        return {}
+    if master_keys is None:
+        raise CredentialsUnavailable(
+            f"{what} are sealed and this worker has no master key provider"
+        )
+    try:
+        plaintext = open_sealed(
+            SealedSecret(
+                ciphertext=bytes(ciphertext),
+                nonce=bytes(nonce or b""),
+                wrapped_dek=bytes(wrapped or b""),
+                key_version=int(key_version or 1),
+            ),
+            provider=master_keys,
+            aad=organization_aad(organization_id),
+        )
+        return msgspec.json.decode(plaintext, type=dict[str, str])
+    except Exception as exc:
+        # Never the exception text: nothing about a failed unseal is worth
+        # putting where a dashboard user can read it.
+        raise CredentialsUnavailable(f"{what} could not be decrypted") from exc
 
 
 @dataclass
@@ -72,6 +135,7 @@ class PostbackMetrics:
     skipped_other_campaign: int = 0
     skipped_unmapped: int = 0
     blocked: int = 0
+    sandboxed: int = 0
     by_status: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
@@ -83,6 +147,7 @@ class PostbackMetrics:
             "skipped_other_campaign": self.skipped_other_campaign,
             "skipped_unmapped": self.skipped_unmapped,
             "blocked": self.blocked,
+            "sandboxed": self.sandboxed,
             "by_status": dict(self.by_status),
         }
 
@@ -96,14 +161,12 @@ class PostbackConsumer:
         consumer_name: str,
         batch_size: int = 200,
         idle_sleep: float = 0.1,
-        sandbox_endpoint: str = SANDBOX_ENDPOINT,
         master_keys: MasterKeyProvider | None = None,
     ) -> None:
         self._redis = redis
         self._database = database
         self._batch_size = batch_size
         self._idle_sleep = idle_sleep
-        self._sandbox_endpoint = sandbox_endpoint
         self._master_keys = master_keys
         self._provider: Provider | None = None
         registry.load_builtin_once()
@@ -247,13 +310,28 @@ class PostbackConsumer:
         ceremony without benefit.
         """
         self._provider = None
+        # The rule's own headers — commonly a partner's Authorization. Stored,
+        # sealed and listed by name since rules had headers, and never sent until
+        # now: this worker did not read them.
+        custom = _open_headers(
+            self._master_keys,
+            rule["organization_id"],
+            rule["rule_headers_ciphertext"],
+            rule["rule_headers_nonce"],
+            rule["rule_wrapped_dek"],
+            rule["rule_key_version"],
+            what="the rule's custom headers",
+        )
 
         provider_name = rule.get("provider")
         if not provider_name:
+            # The rule's headers override content-type: a partner that wants its
+            # body labelled differently says so in the rule.
+            base = {"content-type": "application/json"} if rule["body_template"] else {}
             return PreparedRequest(
                 method=rule["method"],
                 url=render(rule["url_template"], context),
-                headers=({"content-type": "application/json"} if rule["body_template"] else {}),
+                headers={**base, **custom},
                 body=(
                     render(rule["body_template"], context, encode=False).encode()
                     if rule["body_template"]
@@ -276,11 +354,20 @@ class PostbackConsumer:
 
         self._provider = provider
         config = self._config_for(rule)
-        if config is None:
+        prepared = provider.prepare(event_name=event.event_name, context=context, config=config)
+        if prepared is None:
             return None
-        return provider.prepare(event_name=event.event_name, context=context, config=config)
+        # The adapter's headers win over the rule's: they carry the integration's
+        # authentication, and a rule header must not be able to replace it.
+        return PreparedRequest(
+            method=prepared.method,
+            url=prepared.url,
+            headers={**custom, **prepared.headers},
+            body=prepared.body,
+            success_codes=prepared.success_codes,
+        )
 
-    def _config_for(self, rule: asyncpg.Record) -> ProviderConfig | None:
+    def _config_for(self, rule: asyncpg.Record) -> ProviderConfig:
         """Unseal an integration's credentials for one delivery."""
         import msgspec
         from mmp_crypto.envelope import SealedSecret, open_sealed, organization_aad
@@ -288,13 +375,16 @@ class PostbackConsumer:
         if not rule["credentials_ciphertext"]:
             return ProviderConfig(settings=decode_json(rule["configuration"]) or {})
         if self._master_keys is None:
-            # Sealed credentials with no key provider to open them. This is a
-            # deployment fault, not a per-conversion one, so it is worth being
-            # loud about rather than silently degrading every integration on
-            # this worker to unauthenticated requests that will all be rejected.
-            raise RuntimeError(
-                "postback worker has sealed provider credentials but no master "
-                "key provider; check the worker's KMS configuration"
+            # Sealed credentials with no key provider to open them: a deployment
+            # fault. It used to raise here, which left the queue message
+            # unacknowledged and the conversion silently never sent — and the
+            # worker's entry point did not pass a key provider at all, so that was
+            # every integration postback in production. Now it is recorded, with
+            # the reason, on the delivery.
+            log.error("postback_worker_has_no_master_keys", rule_id=str(rule["id"]))
+            raise CredentialsUnavailable(
+                "the integration's credentials are sealed and this worker has no "
+                "master key provider"
             )
         try:
             plaintext = open_sealed(
@@ -307,12 +397,14 @@ class PostbackConsumer:
                 provider=self._master_keys,
                 aad=organization_aad(rule["organization_id"]),
             )
-        except Exception:
+        except Exception as exc:
             # Without credentials the request cannot be authenticated, and an
-            # unauthenticated one would be rejected anyway. Better to skip and
-            # say why than to send something that cannot work.
+            # unauthenticated one would be rejected anyway. Better to record why
+            # than to send something that cannot work.
             log.exception("provider_credentials_undecryptable", rule_id=str(rule["id"]))
-            return None
+            raise CredentialsUnavailable(
+                "the integration's credentials could not be decrypted"
+            ) from exc
         return ProviderConfig(
             credentials=msgspec.json.decode(plaintext, type=dict[str, str]),
             settings=decode_json(rule["configuration"]) or {},
@@ -367,7 +459,21 @@ class PostbackConsumer:
         # The adapter describes the request; the engine sends it. That split is
         # what keeps the SSRF guard, the delivery claim and the retry policy
         # outside any provider's reach.
-        prepared = self._prepare(rule, event, context)
+        try:
+            prepared = self._prepare(rule, event, context)
+        except CredentialsUnavailable as exc:
+            await record(
+                conn,
+                delivery_id=delivery_id,
+                result=DeliveryResult(
+                    delivered=False, status_code=None, body=None, error=f"blocked: {exc}"
+                ),
+                success_codes=[],
+                attempt=1,
+            )
+            self.metrics.blocked += 1
+            log.error("postback_credentials_unavailable", rule_id=str(rule["id"]), reason=str(exc))
+            return
         if prepared is None:
             # The provider does not accept this event. Recorded and abandoned
             # rather than retried: it will not become acceptable later.
@@ -386,13 +492,25 @@ class PostbackConsumer:
             self.metrics.skipped_unmapped += 1
             return
 
-        url = self._sandbox_endpoint if sandbox else prepared.url
+        if sandbox:
+            await record_sandbox(
+                conn,
+                delivery_id=delivery_id,
+                method=prepared.method,
+                url=prepared.url,
+                body=prepared.body,
+            )
+            self.metrics.sandboxed += 1
+            self.metrics.by_status["sandbox"] = self.metrics.by_status.get("sandbox", 0) + 1
+            log.info("postback_sandboxed", rule_id=str(rule["id"]), event_id=event.event_id)
+            return
+
+        url = prepared.url
         result = await send(
             url=url,
             method=prepared.method,
             headers=prepared.headers or None,
             body=prepared.body,
-            allow_http=sandbox,
         )
 
         # A provider returning 200 with an error in the body is a rejection
@@ -423,6 +541,9 @@ class PostbackConsumer:
             accepted=accepted,
         )
 
+        if status == "failed":
+            await self._remember_for_retry(conn, delivery_id, rule, prepared)
+
         self.metrics.by_status[status] = self.metrics.by_status.get(status, 0) + 1
         if status == "delivered":
             self.metrics.delivered += 1
@@ -442,17 +563,69 @@ class PostbackConsumer:
             event_id=event.event_id,
             status=status,
             response_status=result.status_code,
-            sandbox=sandbox,
             elapsed_ms=result.elapsed_ms,
         )
 
+    async def _remember_for_retry(
+        self,
+        conn: DbConn,
+        delivery_id: uuid.UUID,
+        rule: asyncpg.Record,
+        prepared: PreparedRequest,
+    ) -> None:
+        """Keep the failed request so the retry replays it, headers and all.
 
-async def retry_due(database: Database, *, limit: int = 100) -> int:
-    """Re-attempt deliveries whose backoff has elapsed.
+        Retries used to re-send the stored URL alone, with the rule's method: no
+        custom headers, no adapter authentication, and an empty body for a JSON
+        POST — on exactly the attempts that matter, since a retry means the
+        partner was briefly down. Headers are sealed first: they carry credentials.
+        """
+        import msgspec
+
+        sealed: tuple[bytes, bytes, bytes, int] | None = None
+        if prepared.headers:
+            if self._master_keys is None:
+                # Storing credentials in the clear is not an option, and a retry
+                # without them is the bug being fixed. Stop retrying instead.
+                await conn.execute(
+                    "UPDATE postback_deliveries SET status = 'abandoned', next_retry_at = NULL, "
+                    "error = 'cannot keep headers for a retry: no master key provider' "
+                    "WHERE id = $1",
+                    delivery_id,
+                )
+                return
+            box = seal(
+                msgspec.json.encode(prepared.headers),
+                provider=self._master_keys,
+                aad=organization_aad(rule["organization_id"]),
+            )
+            sealed = (box.ciphertext, box.nonce, box.wrapped_dek, box.key_version)
+        await remember_request(
+            conn,
+            delivery_id=delivery_id,
+            method=prepared.method,
+            body=prepared.body,
+            sealed_headers=sealed,
+        )
+
+
+async def retry_due(
+    database: Database,
+    *,
+    master_keys: MasterKeyProvider | None = None,
+    limit: int = 100,
+) -> int:
+    """Re-attempt deliveries whose backoff has elapsed, replaying the request exactly.
 
     Separate from the consumer because a retry is not driven by a queue message:
     that message was acknowledged when the first attempt was recorded. This is
     what turns a partner's outage into a delay rather than a loss.
+
+    A retry used to re-send the stored URL with the rule's method and nothing
+    else — no custom headers, no adapter authentication, no body. The failed
+    attempt now stores its method, body and sealed headers, and the retry sends
+    those. A row stored before that, for a rule whose request needs more than a
+    URL, is abandoned with the reason rather than replayed wrongly.
 
     ``FOR UPDATE SKIP LOCKED`` lets several workers share the backlog without
     two of them claiming the same row — the same problem the delivery claim
@@ -470,12 +643,20 @@ async def retry_due(database: Database, *, limit: int = 100) -> int:
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING d.id, d.attempt_count, d.request_url, d.postback_rule_id
+        RETURNING d.id, d.organization_id, d.attempt_count, d.request_url, d.postback_rule_id,
+                  d.request_method, d.request_body, d.headers_ciphertext, d.headers_nonce,
+                  d.wrapped_dek, d.key_version
     """
     rule_sql = """
-        SELECT method, success_status_codes, is_sandbox
+        SELECT method, success_status_codes, is_sandbox, body_template,
+               headers_ciphertext IS NOT NULL AS has_headers,
+               provider_integration_id IS NOT NULL AS has_integration
         FROM postback_rules WHERE id = $1
     """
+    abandon_sql = (
+        "UPDATE postback_deliveries SET status = 'abandoned', next_retry_at = NULL, "
+        "error = $2 WHERE id = $1"
+    )
 
     retried = 0
     async with database.system_connection() as conn:
@@ -484,26 +665,53 @@ async def retry_due(database: Database, *, limit: int = 100) -> int:
             if not row["request_url"]:
                 # Nothing to re-send. Abandon rather than loop forever on a row
                 # that can never succeed.
-                await conn.execute(
-                    "UPDATE postback_deliveries SET status = 'abandoned', "
-                    "error = 'no stored request URL to retry' WHERE id = $1",
-                    row["id"],
-                )
+                await conn.execute(abandon_sql, row["id"], "no stored request URL to retry")
                 continue
 
             rule = await conn.fetchrow(rule_sql, row["postback_rule_id"])
             if rule is None:
+                await conn.execute(abandon_sql, row["id"], "rule no longer exists")
+                continue
+            if rule["is_sandbox"]:
+                # Switched to sandbox since the attempt failed. Whoever did that
+                # does not want this rule reaching the partner.
+                await conn.execute(abandon_sql, row["id"], "rule is now in sandbox mode")
+                continue
+
+            if row["request_method"] is not None:
+                try:
+                    headers = _open_headers(
+                        master_keys,
+                        row["organization_id"],
+                        row["headers_ciphertext"],
+                        row["headers_nonce"],
+                        row["wrapped_dek"],
+                        row["key_version"],
+                        what="the stored request's headers",
+                    )
+                except CredentialsUnavailable as exc:
+                    await conn.execute(abandon_sql, row["id"], f"blocked: {exc}")
+                    continue
+                method = row["request_method"]
+                body = bytes(row["request_body"]) if row["request_body"] is not None else None
+            elif rule["body_template"] or rule["has_headers"] or rule["has_integration"]:
+                # Recorded before failed requests were stored in full. Replaying
+                # the URL alone is exactly the bug, so say so instead.
                 await conn.execute(
-                    "UPDATE postback_deliveries SET status = 'abandoned', "
-                    "error = 'rule no longer exists' WHERE id = $1",
+                    abandon_sql,
                     row["id"],
+                    "cannot retry faithfully: attempted before full requests were stored",
                 )
                 continue
+            else:
+                # A plain GET with no headers and no body: the URL is the request.
+                method, headers, body = rule["method"], {}, None
 
             result = await send(
                 url=row["request_url"],
-                method=rule["method"],
-                allow_http=rule["is_sandbox"],
+                method=method,
+                headers=headers or None,
+                body=body,
             )
             await record(
                 conn,

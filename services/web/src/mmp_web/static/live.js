@@ -130,7 +130,10 @@
       cell(item.device, "live-device"),
       cell(describe(item), "live-detail"),
     );
-    if (item.kind === "rejected" || (item.kind === "postback" && item.status !== "delivered")) {
+    // Sandbox and in-flight deliveries are not problems: only a delivery that
+    // failed, was abandoned or was blocked needs someone to look at it.
+    if (item.kind === "rejected" ||
+        (item.kind === "postback" && ["failed", "abandoned"].includes(item.status))) {
       row.classList.add("live-problem");
     }
 

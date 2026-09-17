@@ -23,6 +23,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mmp_db.base import Base, OrgScopedMixin, TimestampMixin, one_of, org_fk, uuid_pk
 
 DELIVERY_STATUSES = ("pending", "in_flight", "delivered", "failed", "abandoned")
+# Postbacks add "sandbox": recorded for a sandbox rule, which makes no network
+# call. Webhooks have no sandbox mode, so they keep the shared set.
+POSTBACK_DELIVERY_STATUSES = (*DELIVERY_STATUSES, "sandbox")
 HTTP_METHODS = ("GET", "POST")
 INTEGRATION_STATUSES = ("active", "paused", "error")
 
@@ -121,7 +124,7 @@ class PostbackDelivery(Base, OrgScopedMixin):
     __tablename__ = "postback_deliveries"
     __table_args__ = (
         UniqueConstraint("postback_rule_id", "event_id"),
-        CheckConstraint(one_of("status", *DELIVERY_STATUSES), name="status_valid"),
+        CheckConstraint(one_of("status", *POSTBACK_DELIVERY_STATUSES), name="status_valid"),
         Index(
             "ix_postback_deliveries_retry",
             "next_retry_at",
@@ -137,6 +140,15 @@ class PostbackDelivery(Base, OrgScopedMixin):
     event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     attempt_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    # The request a failed attempt made, so a retry replays it exactly. Headers
+    # are sealed: they carry partner credentials. Written only on a failure that
+    # will be retried.
+    request_method: Mapped[str | None] = mapped_column(String(8))
+    request_body: Mapped[bytes | None] = mapped_column(BYTEA)
+    headers_ciphertext: Mapped[bytes | None] = mapped_column(BYTEA)
+    headers_nonce: Mapped[bytes | None] = mapped_column(BYTEA)
+    wrapped_dek: Mapped[bytes | None] = mapped_column(BYTEA)
+    key_version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
 
     request_url: Mapped[str | None] = mapped_column(Text)
     response_status: Mapped[int | None] = mapped_column(Integer)

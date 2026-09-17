@@ -1185,4 +1185,4 @@ async def test_an_unticked_checkbox_means_false(signed_in, monkeypatch):
         },
     )
     assert sent and sent[0]["requires_attribution"] is False
-    assert sent[0]["is_sandbox"] is False, "sandbox is broken and must not be sent as on"
+    assert sent[0]["is_sandbox"] is False

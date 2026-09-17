@@ -21,7 +21,8 @@ What it does not show, deliberately:
 * **device and IP hashes.** They are stable pseudonyms for a person, derived
   under a system-wide pepper, and nobody verifying an integration needs one.
 * **full postback URLs.** Advertisers put partner tokens in postback query
-  strings; the host and the outcome are what a delivery problem needs.
+  strings; the host and the outcome are what a delivery problem needs. The one
+  exception is a sandbox delivery, whose rendered URL is the point of it.
 
 Tenancy is checked explicitly rather than left to row-level security. The rows
 from Postgres are scoped by RLS, but rejections come from Redis, which has no
@@ -274,6 +275,12 @@ async def live_feed(
                     "delivered_at": _iso(row["delivered_at"]),
                     "error": (row["error"] or "")[:MAX_ERROR_CHARS] or None,
                     "event_id": str(row["event_id"]) if row["event_id"] else None,
+                    # A sandbox delivery exists to show what would have been sent,
+                    # and was never sent. Its URL is the rule's own template with
+                    # values filled in, which the postbacks page already shows.
+                    "sandbox_request_url": (
+                        row["request_url"] if row["status"] == "sandbox" else None
+                    ),
                 },
             }
         )

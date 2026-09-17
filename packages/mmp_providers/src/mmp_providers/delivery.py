@@ -112,7 +112,38 @@ SET status = $2::text,
     -- Stored so a retry can re-send the exact request. The URL embeds the
     -- event's context, which is gone by the time the backoff elapses: the queue
     -- message was acknowledged when the first attempt was recorded.
-    request_url = coalesce($7, request_url)
+    request_url = coalesce($7, request_url),
+    -- A delivered request no longer needs replaying, so the sealed copy of its
+    -- headers goes. Kept on failed and abandoned rows, because either can still
+    -- be retried, and a retry without its headers is the bug this replaces.
+    headers_ciphertext = CASE WHEN $2::text = 'delivered' THEN NULL ELSE headers_ciphertext END,
+    headers_nonce = CASE WHEN $2::text = 'delivered' THEN NULL ELSE headers_nonce END,
+    wrapped_dek = CASE WHEN $2::text = 'delivered' THEN NULL ELSE wrapped_dek END
+WHERE id = $1
+"""
+
+SANDBOX_SQL = """
+UPDATE postback_deliveries
+SET status = 'sandbox',
+    request_url = $2,
+    request_method = $3,
+    request_body = $4,
+    response_status = NULL,
+    response_body = NULL,
+    error = NULL,
+    next_retry_at = NULL,
+    delivered_at = now()
+WHERE id = $1
+"""
+
+REMEMBER_SQL = """
+UPDATE postback_deliveries
+SET request_method = $2,
+    request_body = $3,
+    headers_ciphertext = $4,
+    headers_nonce = $5,
+    wrapped_dek = $6,
+    key_version = $7
 WHERE id = $1
 """
 
@@ -222,3 +253,38 @@ async def record(
         request_url,
     )
     return status
+
+
+async def record_sandbox(
+    conn: DbConn, *, delivery_id: object, method: str, url: str, body: bytes | None
+) -> str:
+    """Record what a sandbox rule would have sent, without sending it.
+
+    Sandbox rules used to post to an internal echo endpoint that never existed,
+    so every sandbox delivery failed. Making no call at all is simpler and
+    better: nothing can leave, the rule's destination need not be reachable, and
+    the stored request is exactly what the partner would have received — which
+    is the thing someone testing a rule wants to look at.
+    """
+    await conn.execute(SANDBOX_SQL, delivery_id, url, method, body)
+    return "sandbox"
+
+
+async def remember_request(
+    conn: DbConn,
+    *,
+    delivery_id: object,
+    method: str,
+    body: bytes | None,
+    sealed_headers: tuple[bytes, bytes, bytes, int] | None,
+) -> None:
+    """Keep a failed request so its retry can replay it exactly.
+
+    Called only when an attempt has failed and will be retried. ``sealed_headers``
+    is ciphertext, nonce, wrapped data key and key version — sealed by the caller,
+    which holds the master keys; this module never sees a header value.
+    """
+    ciphertext, nonce, wrapped, key_version = sealed_headers or (None, None, None, 1)
+    await conn.execute(
+        REMEMBER_SQL, delivery_id, method, body, ciphertext, nonce, wrapped, key_version
+    )

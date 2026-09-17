@@ -97,8 +97,8 @@ fraud_findings :: id, organization_id, app_id, tracking_link_id, campaign_id, wi
 organization_members :: id, organization_id, user_id, role, created_at, updated_at
 organizations :: id, name, slug, timezone, created_at, updated_at
 pipeline_audit :: id, app_id, bucket_hour, stage, count, recorded_at
-postback_deliveries :: id, organization_id, postback_rule_id, event_id, status, attempt_count, request_url, response_status, response_body, error, created_at, delivered_at, next_retry_at
-postback_rules :: id, organization_id, app_id, provider_integration_id, name, trigger_event, method, url_template, body_template, headers_ciphertext, headers_nonce, wrapped_dek, success_status_codes, requires_attribution, is_sandbox, enabled, created_at, updated_at
+postback_deliveries :: id, organization_id, postback_rule_id, event_id, status, attempt_count, request_method, request_url, request_body, headers_ciphertext, headers_nonce, wrapped_dek, key_version, response_status, response_body, error, created_at, delivered_at, next_retry_at
+postback_rules :: id, organization_id, app_id, provider_integration_id, name, trigger_event, method, url_template, body_template, headers_ciphertext, headers_nonce, wrapped_dek, key_version, campaign_id, success_status_codes, requires_attribution, is_sandbox, enabled, created_at, updated_at
 provider_integrations :: id, organization_id, provider, name, credentials_ciphertext, credentials_nonce, wrapped_dek, key_version, configuration, status, last_health_check_at, created_at, updated_at
 rollup_campaign_daily :: organization_id, app_id, bucket_day, campaign_id, clicks, installs, organic_installs, revenue_minor, conversions, updated_at
 rollup_clicks_hourly :: organization_id, app_id, bucket_hour, campaign_id, platform, click_count, bot_count, updated_at

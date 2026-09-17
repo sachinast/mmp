@@ -90,7 +90,18 @@ async def run(settings: Settings | None = None) -> None:
     # Its own consumer group again: a conversion must reach an ad network
     # promptly, and networks optimise spend on these signals — a late postback
     # is spend misallocated.
-    postbacks = PostbackConsumer(redis=redis, database=database, consumer_name=consumer_name())
+    # Built once and shared: the postback consumer opens rule headers and
+    # integration credentials, the retry job opens stored request headers, and
+    # the webhook sender opens signing secrets — all under the same master key.
+    # The postback consumer used to be built without one, so in production every
+    # postback through a connected network failed to open its credentials.
+    master_keys = provider_from_settings(settings)
+    postbacks = PostbackConsumer(
+        redis=redis,
+        database=database,
+        consumer_name=consumer_name(),
+        master_keys=master_keys,
+    )
     # Its own group again. A customer's webhook receiver may be a serverless
     # function someone wrote once and forgot; it must not be able to slow the
     # delivery of conversions to an ad network.
@@ -98,7 +109,7 @@ async def run(settings: Settings | None = None) -> None:
         redis=redis,
         database=database,
         consumer_name=consumer_name(),
-        master_keys=provider_from_settings(settings),
+        master_keys=master_keys,
     )
 
     stop = asyncio.Event()
@@ -152,7 +163,7 @@ async def run(settings: Settings | None = None) -> None:
         tasks.create_task(
             _every(
                 RETRY_INTERVAL,
-                lambda: retry_due(database),
+                lambda: retry_due(database, master_keys=master_keys),
                 name="postback-retries",
                 stop=stop,
             ),

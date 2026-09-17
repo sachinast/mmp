@@ -141,6 +141,17 @@ Destinations are validated **when a rule is saved**, so a bad one is a 422 the
 user sees rather than a delivery failure found in a log. Patching a rule out of
 sandbox revalidates, or the check could be skipped by creating in sandbox mode.
 
+A sandbox rule makes **no network call at all**: it renders the request and
+records it with status `sandbox`, so it cannot be used to reach anything.
+
+A failed delivery keeps what a faithful retry needs: method, body and headers.
+Headers can carry a partner's credentials, so they are stored **sealed** under
+the organisation's envelope key (with its key version), never in plaintext, and
+are cleared once the delivery succeeds. An abandoned row keeps them, so a manual
+retry replays the same request. A worker that cannot open them abandons the
+retry with a `blocked:` error rather than sending the request without its
+authentication.
+
 **Defence in depth, not sole defence:** outbound delivery should also run from a
 network segment with no route to internal services. That control lives in
 infrastructure and is listed in the production checklist.

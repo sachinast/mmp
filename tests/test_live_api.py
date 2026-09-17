@@ -325,3 +325,21 @@ async def test_platforms_are_named_not_numbered(account, owner_conn):
     platforms = {item["kind"]: item.get("platform") for item in body["items"]}
     assert platforms["click"] == "android"
     assert platforms["event"] == "android"
+
+
+async def test_a_sandbox_delivery_shows_the_request_it_would_have_sent(account, owner_conn):
+    """Sandbox exists to show the rendered request. It was never sent, so there
+    is no delivery to protect — only the URL to check."""
+    app = await _app(account, package="com.example.pbsandbox")
+    ids = await _seed(owner_conn, account.organization["id"], app["id"])
+    await owner_conn.execute(
+        "UPDATE postback_deliveries SET status = 'sandbox', response_status = NULL WHERE id = $1",
+        uuid.UUID(ids["postback"]),
+    )
+
+    body = (await account.client.get("/v1/live", params={"app_id": app["id"]})).json()
+    postback = next(item for item in body["items"] if item["kind"] == "postback")
+    assert postback["status"] == "sandbox"
+    assert postback["details"]["sandbox_request_url"] == (
+        "https://net.example/pb?click=1&token=PARTNER-SECRET-TOKEN"
+    )

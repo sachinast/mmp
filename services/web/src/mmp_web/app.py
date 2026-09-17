@@ -880,6 +880,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         campaign_id: str = Form(""),
         method: str = Form("GET"),
         requires_attribution: str = Form(""),
+        is_sandbox: str = Form(""),
         csrf_token: str = Form(""),
     ) -> Response:
         api = client_for(request)
@@ -894,10 +895,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "method": "POST" if method == "POST" else "GET",
             # An unticked checkbox is absent from a form post, not "false".
             "requires_attribution": bool(requires_attribution),
-            # Not offered on the form: sandbox deliveries currently post to an
-            # internal endpoint that does not exist, so every one fails. Kept at
-            # false until that is fixed rather than advertised while broken.
-            "is_sandbox": False,
+            # Sandbox renders the request and records it without sending it, so a
+            # rule can be checked on Live events before the partner hears anything.
+            "is_sandbox": bool(is_sandbox),
         }
         if campaign_id:
             body["campaign_id"] = campaign_id
