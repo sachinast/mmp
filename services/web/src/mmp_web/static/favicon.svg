@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MMP">
+  <!-- Legible at 16px, which is the only size that really matters: a filled
+       tile with one rising signal, not a logotype that turns to mush. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#63aaff"/>
+      <stop offset="1" stop-color="#3f7fe0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0f1216"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="13" fill="none" stroke="url(#g)" stroke-width="3"/>
+  <g fill="url(#g)">
+    <rect x="16" y="36" width="8" height="12" rx="2.5"/>
+    <rect x="28" y="27" width="8" height="21" rx="2.5"/>
+    <rect x="40" y="16" width="8" height="32" rx="2.5"/>
+  </g>
+</svg>

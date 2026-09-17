@@ -42,6 +42,7 @@ log = get_logger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 LIVE_SCRIPT = Path(__file__).parent / "static" / "live.js"
+FAVICON = Path(__file__).parent / "static" / "favicon.svg"
 
 # Grouped, because ten flat items is a list to read rather than a structure to
 # navigate. The groups follow what someone is doing — looking at numbers,
@@ -750,6 +751,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=LIVE_SCRIPT.read_bytes(),
             media_type="text/javascript",
             headers={"cache-control": "no-cache", "x-content-type-options": "nosniff"},
+        )
+
+    @app.get("/static/favicon.svg", include_in_schema=False)
+    async def favicon() -> Response:
+        """Same origin, like everything else this page loads.
+
+        Cached for a day: it is requested on every page load and changes about
+        as often as the product's name does.
+        """
+        return Response(
+            content=FAVICON.read_bytes(),
+            media_type="image/svg+xml",
+            headers={"cache-control": "public, max-age=86400", "x-content-type-options": "nosniff"},
         )
 
     # ------------------------------------------------------------ fraud

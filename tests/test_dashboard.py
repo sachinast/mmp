@@ -1186,3 +1186,16 @@ async def test_an_unticked_checkbox_means_false(signed_in, monkeypatch):
     )
     assert sent and sent[0]["requires_attribution"] is False
     assert sent[0]["is_sandbox"] is False
+
+
+async def test_the_favicon_is_served_from_this_origin(signed_in):
+    """Every page links it, and the content-security policy allows images from
+    nowhere else."""
+    response = await signed_in["client"].get("/static/favicon.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.text.lstrip().startswith("<svg")
+    assert "<script" not in response.text, "an SVG is a document; it must not carry script"
+
+    page = await signed_in["client"].get("/")
+    assert '<link rel="icon" href="/static/favicon.svg"' in page.text

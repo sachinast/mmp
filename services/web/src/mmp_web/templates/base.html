@@ -10,87 +10,166 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}MMP{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/favicon.svg">
+  <meta name="theme-color" content="#0b0e13">
   <style>
     :root {
-      --bg: #0f1216; --surface: #171b21; --surface-2: #1e242b;
-      --border: #2a323b; --text: #e6ebf0; --muted: #8b98a5;
-      --accent: #4f9cf9; --good: #46b978; --warn: #d9a441; --bad: #e56b62;
-      --radius: 6px;
+      /* A darker, slightly blue-shifted base with two surface steps above it,
+         so a card on the page and a header inside that card are told apart by
+         depth rather than by another border. */
+      --bg: #0b0e13; --surface: #141920; --surface-2: #1b212a; --surface-3: #232b36;
+      --border: #262f3a; --border-strong: #35404e;
+      --text: #e9eef4; --muted: #92a0b0; --faint: #64717f;
+      --accent: #5aa2ff; --accent-strong: #8cc0ff; --accent-dim: #2b4f80;
+      --good: #4cc38a; --warn: #e0ad4e; --bad: #ef6f66;
+      --radius: 8px; --radius-sm: 5px; --radius-lg: 12px;
+      /* Two shadows per elevation: a tight one to seat the edge, a wide soft
+         one for the lift. One shadow alone reads as a smudge on a dark page. */
+      --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 20px -8px rgb(0 0 0 / .55);
+      --shadow-lg: 0 2px 4px rgb(0 0 0 / .45), 0 18px 40px -14px rgb(0 0 0 / .65);
+      --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+      --speed: .14s;
+      /* Tells the browser to draw its own controls dark: the date picker's
+         calendar, select menus and scrollbars all came out white-on-white
+         otherwise, which is the bug that made the date fields look broken. */
+      color-scheme: dark;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      /* Kerning and ligatures on, numbers lined up in columns: the whole page
+         is measurements, and a column of figures that jitters is hard to scan. */
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "kern" 1, "liga" 1, "tnum" 1;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    /* A single wash of accent at the top of the page, behind everything. It is
+       what stops a flat dark rectangle from looking like a terminal. */
+    body::before {
+      content: ""; position: fixed; inset: 0 0 auto; height: 320px; z-index: -1;
+      background: radial-gradient(90% 100% at 22% 0,
+        color-mix(in srgb, var(--accent) 11%, transparent), transparent 70%);
+      pointer-events: none;
+    }
+    a { color: var(--accent); text-decoration: none; transition: color var(--speed); }
+    a:hover { color: var(--accent-strong); text-decoration: underline; }
+    ::selection { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+    /* Scrollbars, which are furniture on a page of long tables. */
+    * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-strong); border-radius: 6px; border: 3px solid transparent;
+      background-clip: content-box;
+    }
+    ::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--faint); }
     /* Sidebar rather than a top bar. Ten destinations is too many to scan
        horizontally, and a vertical list has room for the grouping that makes
        them findable — it also gives tables the full width of the page, which
        is what most of these pages are. */
     .shell { display: flex; min-height: 100vh; align-items: stretch; }
     .sidebar {
-      width: 210px; flex: 0 0 210px; background: var(--surface);
+      width: 216px; flex: 0 0 216px;
+      background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface) 80%, var(--bg)));
       border-right: 1px solid var(--border); display: flex; flex-direction: column;
-      padding: 16px 12px;
+      padding: 14px 12px;
       /* Sticky rather than fixed: the content scrolls past a nav that stays
          put, without taking the sidebar out of flow and having to reserve its
          width by hand. */
       position: sticky; top: 0; align-self: flex-start; height: 100vh;
       overflow-y: auto;
     }
+    /* The name sits next to its own mark, so the product is recognisable in a
+       row of pinned tabs and at the top of the page it belongs to. */
     .sidebar .brand {
-      font-weight: 700; color: var(--accent); font-size: 15px;
-      padding: 4px 10px 10px; letter-spacing: .3px;
+      display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15px;
+      color: var(--text); padding: 6px 10px 14px; letter-spacing: .2px;
+    }
+    .sidebar .brand .mark {
+      width: 26px; height: 26px; flex: none; border-radius: 7px;
+      background: linear-gradient(140deg, var(--accent-strong), var(--accent-dim));
+      display: grid; place-items: center; box-shadow: var(--shadow);
+    }
+    .sidebar .brand .mark::after {
+      content: ""; width: 12px; height: 9px; border-radius: 1px;
+      /* Three rising bars, drawn in one element: the favicon at nav size. */
+      background:
+        linear-gradient(#0b0e13, #0b0e13) 0 100% / 3px 4px no-repeat,
+        linear-gradient(#0b0e13, #0b0e13) 4.5px 100% / 3px 7px no-repeat,
+        linear-gradient(#0b0e13, #0b0e13) 9px 100% / 3px 9px no-repeat;
     }
     .sidebar .links { display: flex; flex-direction: column; gap: 2px; }
     .sidebar .group {
-      color: var(--muted); font-size: 10px; text-transform: uppercase;
-      letter-spacing: .8px; padding: 14px 10px 5px;
+      color: var(--faint); font-size: 10px; text-transform: uppercase;
+      font-weight: 600; letter-spacing: .9px; padding: 16px 10px 5px;
     }
     .sidebar a.item {
-      color: var(--muted); padding: 7px 10px; border-radius: var(--radius);
-      display: block; font-size: 13px;
-      /* Transparent on every item, coloured only when active, so a label does
-         not shift sideways as you move between pages. */
-      border-left: 2px solid transparent;
+      color: var(--muted); padding: 7px 10px; border-radius: var(--radius-sm);
+      display: block; font-size: 13px; position: relative;
+      transition: background var(--speed), color var(--speed);
     }
     .sidebar a.item:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
     .sidebar a.item.active {
-      background: var(--surface-2); color: var(--text); border-left-color: var(--accent);
+      background: linear-gradient(90deg,
+        color-mix(in srgb, var(--accent) 16%, transparent), transparent 85%);
+      color: var(--text); font-weight: 600;
+    }
+    /* The marker is drawn inside the item rather than as a border, so a label
+       does not shift sideways as you move between pages. */
+    .sidebar a.item.active::before {
+      content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px;
+      border-radius: 2px; background: var(--accent);
     }
     .sidebar .spacer { flex: 1; min-height: 20px; }
-    .sidebar .account { border-top: 1px solid var(--border); padding-top: 10px; }
+    .sidebar .account { border-top: 1px solid var(--border); padding-top: 12px; }
     .sidebar .who { display: block; color: var(--muted); font-size: 12px;
                     padding: 0 10px 8px; word-break: break-word; }
     .sidebar .who strong { display: block; color: var(--text); font-weight: 600; }
     .sidebar .account form { padding: 0 10px; }
     .sidebar .account button { width: 100%; }
-    main { flex: 1; min-width: 0; max-width: 1180px; padding: 24px 24px 64px; }
-    h1 { font-size: 20px; margin-bottom: 4px; }
-    h2 { font-size: 15px; margin: 28px 0 10px; }
-    .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
-    .card { background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius); padding: 16px; }
+    main { flex: 1; min-width: 0; max-width: 1220px; padding: 28px 28px 72px; }
+    h1 { font-size: 21px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 5px; }
+    h2 { font-size: 15px; font-weight: 600; margin: 30px 0 10px; letter-spacing: -.005em; }
+    .sub { color: var(--muted); margin-bottom: 22px; font-size: 13px; max-width: 70ch; }
+    .card {
+      background: linear-gradient(180deg,
+        color-mix(in srgb, var(--surface) 92%, var(--surface-2)), var(--surface));
+      border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px;
+      box-shadow: var(--shadow);
+    }
     .grid { display: grid; gap: 12px; }
     .cols-4 { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
     .cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase;
-                   letter-spacing: .5px; }
-    .stat .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;
-                   margin-top: 4px; }
+    /* A statistic is the thing people come to read, so it gets the one piece of
+       real typography on the page: a large, tight, tabular figure. */
+    .stat { transition: border-color var(--speed), transform var(--speed); }
+    .stat:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+    .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                   font-weight: 600; letter-spacing: .6px; }
+    .stat .value { font-size: 28px; font-weight: 640; font-variant-numeric: tabular-nums;
+                   letter-spacing: -.02em; margin-top: 6px; line-height: 1.15; }
     .stat .value.none { color: var(--muted); font-size: 20px; font-weight: 400; }
     table { width: 100%; border-collapse: collapse; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border);
-                  border-radius: var(--radius); background: var(--surface); }
-    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
-         color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--border);
-         background: var(--surface-2); white-space: nowrap; }
-    td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+                  border-radius: var(--radius-lg); background: var(--surface);
+                  box-shadow: var(--shadow); }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+         font-weight: 600; color: var(--muted); padding: 11px 14px;
+         border-bottom: 1px solid var(--border); background: var(--surface-2);
+         white-space: nowrap;
+         /* The header stays put while a long table scrolls under it — otherwise
+            the columns lose their names a screen into the data. */
+         position: sticky; top: 0; z-index: 1; }
+    td { padding: 11px 14px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+         vertical-align: top; }
+    tbody tr { transition: background var(--speed); }
+    tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
     tr:last-child td { border-bottom: none; }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .pill { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 10px;
-            border: 1px solid var(--border); color: var(--muted); }
+    .pill { display: inline-block; font-size: 11px; font-weight: 550; padding: 2px 8px;
+            border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+            background: color-mix(in srgb, currentColor 8%, transparent);
+            white-space: nowrap; }
     .pill.active { color: var(--good); border-color: var(--good); }
     .pill.disabled { color: var(--muted); }
     .pill.referrer { color: var(--good); border-color: var(--good); }
@@ -106,25 +185,109 @@
     .pill.sev-low { color: var(--muted); }
     .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--text); margin-bottom: 6px; }
-    .error { border-left: 3px solid var(--bad); background: var(--surface);
+    .error { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--border));
+             border-left: 3px solid var(--bad);
+             background: color-mix(in srgb, var(--bad) 7%, var(--surface));
              padding: 14px 16px; border-radius: var(--radius); margin-bottom: 16px; }
     .error strong { color: var(--bad); }
-    form.inline { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
-    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    form.inline { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+    label { display: block; font-size: 12px; font-weight: 550; color: var(--muted);
+            margin-bottom: 5px; }
+    /* One height for every control, so a row of app / from / to / button sits on
+       a single baseline instead of stepping up and down. */
+    input, select, button, .chip {
+      height: 34px; font-size: 13px; font-family: inherit;
+      border-radius: var(--radius); transition: border-color var(--speed),
+        box-shadow var(--speed), background var(--speed), color var(--speed);
+    }
     input, select {
       background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-      padding: 7px 9px; border-radius: var(--radius); font-size: 13px; font-family: inherit;
+      padding: 0 10px;
     }
-    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    textarea { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+               padding: 8px 10px; border-radius: var(--radius); font-size: 13px;
+               font-family: inherit; }
+    input::placeholder { color: var(--faint); }
+    input:hover, select:hover, textarea:hover { border-color: var(--border-strong); }
+    /* A ring rather than an outline: it follows the rounded corner instead of
+       drawing a rectangle around it, which is what made focused fields look
+       like a validation error. */
+    input:focus, select:focus, textarea:focus, button:focus-visible, .chip:focus-visible,
+    a:focus-visible {
+      outline: none; border-color: var(--accent); box-shadow: var(--ring);
+    }
+    a:focus-visible { border-radius: var(--radius-sm); }
+    select {
+      /* The browser's own arrow is inconsistent between platforms; this one is
+         drawn in the field and leaves room for itself. */
+      appearance: none; padding-right: 30px;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: right 15px center, right 10px center;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      cursor: pointer;
+    }
+    /* --- dates ---------------------------------------------------------
+       A date field is three tiny spin areas and a picker button, all styled by
+       the browser. Left alone on a dark page the picker icon is drawn near
+       black on a near black field — invisible, so the field looked broken and
+       unclickable. `color-scheme: dark` fixes the popup; these rules fix the
+       field itself. */
+    input[type=date] {
+      min-width: 148px; cursor: text;
+      /* Safari ignores width on date inputs and lets them overflow their
+         column; a fixed line height keeps the text centred in the 34px box. */
+      line-height: 32px;
+    }
+    input[type=date]::-webkit-calendar-picker-indicator {
+      /* The stock icon, tinted to the muted text colour and brightened on
+         hover, so it is visible and obviously a button. */
+      filter: invert(64%) sepia(9%) saturate(400%) hue-rotate(175deg) brightness(95%);
+      cursor: pointer; opacity: .9; padding: 2px; border-radius: 4px;
+      transition: filter var(--speed), background var(--speed);
+    }
+    input[type=date]:hover::-webkit-calendar-picker-indicator,
+    input[type=date]:focus::-webkit-calendar-picker-indicator {
+      filter: invert(63%) sepia(60%) saturate(1200%) hue-rotate(185deg) brightness(105%);
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    input[type=date]::-webkit-datetime-edit { color: var(--text); }
+    input[type=date]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+    /* The segment being typed into, so it is clear which of day/month/year a
+       keystroke will change. */
+    input[type=date]::-webkit-datetime-edit-day-field:focus,
+    input[type=date]::-webkit-datetime-edit-month-field:focus,
+    input[type=date]::-webkit-datetime-edit-year-field:focus {
+      background: color-mix(in srgb, var(--accent) 30%, transparent);
+      color: var(--text); border-radius: 3px; outline: none;
+    }
+    input[type=search] { padding-left: 10px; }
+    input[type=checkbox] {
+      height: auto; accent-color: var(--accent); width: 15px; vertical-align: -2px;
+      margin-right: 6px; cursor: pointer;
+    }
+    label:has(input[type=checkbox]) {
+      color: var(--text); font-weight: 400; display: inline-flex; align-items: center;
+      height: 34px; cursor: pointer; margin-bottom: 0;
+    }
     button {
-      background: var(--accent); color: #06121f; border: 0; padding: 8px 14px;
-      border-radius: var(--radius); font-weight: 600; font-size: 13px; cursor: pointer;
-      font-family: inherit;
+      background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+      color: #04101d; border: 0; padding: 0 16px; font-weight: 650; cursor: pointer;
+      box-shadow: var(--shadow);
     }
-    button.secondary { background: var(--surface-2); color: var(--text);
-                       border: 1px solid var(--border); }
+    button:hover { filter: brightness(1.07); }
+    button:active { transform: translateY(1px); }
+    button.secondary {
+      background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+      box-shadow: none;
+    }
+    button.secondary:hover { background: var(--surface-3); border-color: var(--border-strong);
+                             filter: none; }
     code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
-           background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+           background: var(--surface-2); border: 1px solid var(--border);
+           padding: 1px 5px; border-radius: 4px; color: var(--accent-strong); }
     /* Bars in normal flow, not a stretched SVG. A percentage height is exact
        at any container width, so nothing distorts — the earlier SVG was scaled
        to fit and turned a single day's data into a full-width slab. */
@@ -156,10 +319,11 @@
       display: flex; align-items: flex-end;
     }
     .bars .fill {
-      width: 100%; background: var(--accent); border-radius: 2px 2px 0 0;
-      min-height: 2px; transition: opacity .12s;
+      width: 100%; border-radius: 3px 3px 0 0; min-height: 2px;
+      background: linear-gradient(180deg, var(--accent-strong), var(--accent-dim));
+      transition: filter var(--speed);
     }
-    .bars .bar:hover .fill { opacity: .78; }
+    .bars .bar:hover .fill { filter: brightness(1.25); }
     /* A day with no volume: visible as a stub, so a gap reads as "nothing
        happened" rather than as data that failed to load. */
     .bars .fill.empty { min-height: 1px; background: var(--border); }
@@ -187,8 +351,13 @@
     @keyframes live-pulse { 50% { opacity: .25; } }
     .live-filters { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
-            padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-    .chip[aria-pressed=true] { color: var(--text); border-color: var(--accent); }
+            height: 28px; padding: 0 11px; border-radius: 999px; font-size: 12px;
+            font-weight: 550; cursor: pointer; }
+    .chip:hover { border-color: var(--border-strong); color: var(--text); }
+    .chip[aria-pressed=true] {
+      color: var(--text); border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+    }
     .chip span { font-variant-numeric: tabular-nums; opacity: .7; margin-left: 3px; }
     .live-table td { padding: 7px 12px; font-size: 13px; }
     .live-row { cursor: pointer; }
@@ -239,6 +408,9 @@
         align-items: center; padding: 10px 14px; gap: 8px 12px;
       }
       .sidebar .brand { padding: 0; }
+      /* The sticky table head is measured from the page, and on narrow screens
+         the bar above it is part of the page rather than a fixed column. */
+      th { position: static; }
       .sidebar .spacer { display: none; }
       .sidebar .account {
         display: flex; align-items: center; gap: 10px; justify-content: flex-end;
@@ -269,7 +441,7 @@
 <div class="shell">
   {% if user %}
   <aside class="sidebar">
-    <span class="brand">MMP</span>
+    <span class="brand"><span class="mark" aria-hidden="true"></span>MMP</span>
     <nav class="links" aria-label="Sections">
       {% set seen = namespace(group=None) %}
       {% for item in nav_items %}

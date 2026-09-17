@@ -4,26 +4,66 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in · MMP</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0b0e13">
   <style>
-    body { background:#0f1216; color:#e6ebf0; font-size:14px;
+    /* Standalone: this page does not extend the shell, so the few tokens it
+       needs are repeated here rather than pulled in. Kept in step with
+       base.html by hand — there are eight of them. */
+    :root {
+      --bg:#0b0e13; --surface:#141920; --surface-2:#1b212a; --border:#262f3a;
+      --text:#e9eef4; --muted:#92a0b0; --accent:#5aa2ff; --accent-strong:#8cc0ff;
+      --bad:#ef6f66; color-scheme: dark;
+    }
+    /* This page does not extend the shell, so it needs the reset too: without
+       it a full-width input is 100% *plus* its padding, and the fields sat
+       wider than the button beneath them. */
+    *, *::before, *::after { box-sizing:border-box; }
+    body { background:var(--bg); color:var(--text); font-size:14px;
            font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           -webkit-font-smoothing:antialiased;
            display:grid; place-items:center; min-height:100vh; margin:0; }
-    .box { background:#171b21; border:1px solid #2a323b; border-radius:8px;
-           padding:28px; width:340px; }
-    h1 { font-size:18px; margin:0 0 4px; }
-    p.sub { color:#8b98a5; font-size:13px; margin:0 0 20px; }
-    label { display:block; font-size:12px; color:#8b98a5; margin:12px 0 4px; }
-    input { width:100%; background:#1e242b; border:1px solid #2a323b; color:#e6ebf0;
-            padding:9px 10px; border-radius:6px; font-size:14px; font-family:inherit; }
-    input:focus { outline:2px solid #4f9cf9; outline-offset:1px; }
-    button { width:100%; margin-top:18px; background:#4f9cf9; color:#06121f; border:0;
-             padding:10px; border-radius:6px; font-weight:600; font-size:14px;
-             cursor:pointer; font-family:inherit; }
-    .err { color:#e56b62; font-size:13px; margin-top:12px; }
+    /* The same wash as the dashboard, so signing in and arriving look like one
+       product rather than two. */
+    body::before { content:""; position:fixed; inset:0; z-index:-1;
+      background:radial-gradient(70% 55% at 50% 0,
+        color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%); }
+    .box { background:linear-gradient(180deg, var(--surface-2), var(--surface));
+           border:1px solid var(--border); border-radius:14px;
+           padding:30px 28px; width:352px;
+           box-shadow:0 2px 4px rgb(0 0 0 / .45), 0 24px 56px -20px rgb(0 0 0 / .7); }
+    .brand { display:flex; align-items:center; gap:10px; margin-bottom:22px;
+             font-weight:650; letter-spacing:.2px; }
+    .mark { width:30px; height:30px; border-radius:8px; flex:none; display:grid;
+            place-items:center;
+            background:linear-gradient(140deg, var(--accent-strong), #2b4f80); }
+    .mark::after { content:""; width:14px; height:11px;
+      background:
+        linear-gradient(#0b0e13,#0b0e13) 0 100% / 3.5px 5px no-repeat,
+        linear-gradient(#0b0e13,#0b0e13) 5px 100% / 3.5px 8px no-repeat,
+        linear-gradient(#0b0e13,#0b0e13) 10px 100% / 3.5px 11px no-repeat; }
+    h1 { font-size:19px; font-weight:650; letter-spacing:-.01em; margin:0 0 4px; }
+    p.sub { color:var(--muted); font-size:13px; margin:0 0 22px; }
+    label { display:block; font-size:12px; font-weight:550; color:var(--muted);
+            margin:14px 0 5px; }
+    input { width:100%; background:var(--surface-2); border:1px solid var(--border);
+            color:var(--text); padding:10px 11px; border-radius:8px; font-size:14px;
+            font-family:inherit; transition:border-color .14s, box-shadow .14s; }
+    input:hover { border-color:#35404e; }
+    input:focus { outline:none; border-color:var(--accent);
+                  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent); }
+    button { width:100%; margin-top:22px;
+             background:linear-gradient(180deg, var(--accent-strong), var(--accent));
+             color:#04101d; border:0; padding:11px; border-radius:8px; font-weight:650;
+             font-size:14px; cursor:pointer; font-family:inherit; transition:filter .14s; }
+    button:hover { filter:brightness(1.07); }
+    button:active { transform:translateY(1px); }
+    .err { color:var(--bad); font-size:13px; margin-top:14px; }
   </style>
 </head>
 <body>
   <form class="box" method="post" action="/login">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>MMP</div>
     <h1>Sign in</h1>
     <p class="sub">Mobile Measurement Platform</p>
     {# The destination is carried through the form, and validated server-side as
