@@ -16,6 +16,7 @@ from mmp_ingest.stream import CLICKS_STREAM, EVENTS_STREAM, StreamProducer
 from redis.asyncio import Redis
 
 from mmp_tracker.auth import KeyAuthenticator
+from mmp_tracker.blocked import BlockedEvents
 from mmp_tracker.buffer import ShippingBuffer
 from mmp_tracker.linkcache import LinkCache
 
@@ -42,6 +43,7 @@ class TrackerState:
     sessions: SessionTracker
     accepted_counter: AcceptedCounter
     consent: ConsentGate
+    blocked: BlockedEvents
     ingest_limit: RateLimit = field(default=DEFAULT_INGEST_LIMIT)
     accepted_total: int = 0
     clicks_total: int = 0
@@ -79,6 +81,7 @@ class TrackerState:
             sessions=SessionTracker(redis),
             accepted_counter=AcceptedCounter(redis),
             consent=ConsentGate(redis),
+            blocked=BlockedEvents(database, redis),
         )
 
     async def close(self) -> None:

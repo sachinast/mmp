@@ -13,7 +13,7 @@ from tests.conftest_ingest import sample_event
 async def test_accepts_a_batch(tracker):
     response = await tracker.post("/v1/events", json={"events": [sample_event()]})
     assert response.status_code == 202, response.text
-    assert response.json() == {"accepted": 1, "duplicates": 0, "dropped": 0}
+    assert response.json() == {"accepted": 1, "duplicates": 0, "dropped": 0, "blocked": 0}
 
 
 async def test_returns_before_the_write_happens(tracker, owner_conn, seeded_app):
@@ -168,8 +168,8 @@ async def test_client_retry_is_deduplicated_at_the_edge(tracker):
     first = await tracker.post("/v1/events", json={"events": [event]})
     second = await tracker.post("/v1/events", json={"events": [event]})
 
-    assert first.json() == {"accepted": 1, "duplicates": 0, "dropped": 0}
-    assert second.json() == {"accepted": 0, "duplicates": 1, "dropped": 0}
+    assert first.json() == {"accepted": 1, "duplicates": 0, "dropped": 0, "blocked": 0}
+    assert second.json() == {"accepted": 0, "duplicates": 1, "dropped": 0, "blocked": 0}
 
 
 async def test_clock_skew_is_recorded_not_trusted(

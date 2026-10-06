@@ -1,6 +1,6 @@
 """All ORM models. Importing this module registers every table on the metadata."""
 
-from mmp_db.models.apps import ApiKey, App
+from mmp_db.models.apps import ApiKey, App, EventDefinition
 from mmp_db.models.attribution import Attribution, ConversionMapping
 from mmp_db.models.campaigns import Campaign, DeepLink, TrackingLink
 from mmp_db.models.distribution import (
@@ -22,6 +22,7 @@ __all__ = [
     "ConsentState",
     "ConversionMapping",
     "DeepLink",
+    "EventDefinition",
     "Organization",
     "OrganizationMember",
     "PipelineAudit",

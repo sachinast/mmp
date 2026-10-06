@@ -192,6 +192,16 @@ async def ingest_events(request: Request) -> Response:
         )
         return JSONResponse({"error": "invalid_event", "detail": str(exc)}, status_code=422)
 
+    # Blocked names, before consent and before the queue. A definition the
+    # advertiser has blocked is dropped here so that it never reaches a
+    # partition, a rollup or a postback — dropped later it would be a deletion.
+    blocked_names = await state.blocked.names(auth.app_id)
+    blocked = 0
+    if blocked_names:
+        kept = [e for e in queued if canonical_event_name(e.event_name) not in blocked_names]
+        blocked = len(queued) - len(kept)
+        queued = kept
+
     # Consent, before anything is queued.
     #
     # Checked here rather than downstream because consent applied after
@@ -230,6 +240,7 @@ async def ingest_events(request: Request) -> Response:
             "accepted": len(accepted) - dropped,
             "duplicates": duplicates,
             "dropped": dropped,
+            "blocked": blocked,
         },
         status_code=202,
     )

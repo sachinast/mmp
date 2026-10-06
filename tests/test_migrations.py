@@ -74,11 +74,19 @@ def test_the_whole_chain_applies_to_an_empty_database(db_available):
 
     import os
 
+    from tests.conftest_db import TEST_HOST, TEST_PORT
+
     name = f"mmp_migtest_{uuid.uuid4().hex[:10]}"
     user = os.environ.get("MMP_TEST_OWNER", os.environ.get("USER", "postgres"))
+    # The same host and port the rest of the suite uses, so a runner whose
+    # Postgres is not on localhost (a container on a named network) still
+    # exercises the chain. The password, if any, travels through PGPASSWORD,
+    # which both createdb and psycopg read.
+    password = os.environ.get("PGPASSWORD")
+    credentials = f"{user}:{password}" if password else user
     env = {
         **os.environ,
-        "MMP_DATABASE_URL": f"postgresql+asyncpg://{user}@127.0.0.1:5432/{name}",
+        "MMP_DATABASE_URL": f"postgresql+asyncpg://{credentials}@{TEST_HOST}:{TEST_PORT}/{name}",
     }
 
     subprocess.run(["createdb", name], check=True, capture_output=True)

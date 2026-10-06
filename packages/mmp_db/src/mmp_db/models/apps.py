@@ -5,7 +5,17 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, SmallInteger, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,6 +27,8 @@ CONSENT_MODES = ("permissive", "strict")
 KEY_ENVIRONMENTS = ("dev", "prod")
 KEY_STATUSES = ("active", "revoked")
 KEY_KINDS = ("sdk", "s2s")
+EVENT_DEFINITION_KINDS = ("standard", "custom")
+EVENT_DEFINITION_STATUSES = ("active", "blocked")
 
 
 class App(Base, OrgScopedMixin, TimestampMixin):
@@ -93,3 +105,35 @@ class ApiKey(Base, OrgScopedMixin, TimestampMixin):
     # reads in real time.
     last_used_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EventDefinition(Base, OrgScopedMixin, TimestampMixin):
+    """An app's catalogue entry for one event name.
+
+    Documentation and policy, never a gate: an undefined event is still
+    accepted, because an SDK release that adds an event must not lose data
+    until someone updates a list. The one policy is ``status = 'blocked'``,
+    which the tracker enforces at the edge — see ``mmp_ingest.catalogue``.
+    """
+
+    __tablename__ = "event_definitions"
+    __table_args__ = (
+        CheckConstraint(one_of("kind", *EVENT_DEFINITION_KINDS), name="kind_valid"),
+        CheckConstraint(one_of("status", *EVENT_DEFINITION_STATUSES), name="status_valid"),
+        UniqueConstraint("app_id", "name", name="uq_event_definitions_app_name"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    organization_id: Mapped[uuid.UUID] = org_fk()
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("apps.id", ondelete="CASCADE"), index=True
+    )
+    # Exactly as the SDK sends it; events are stored under the name as sent.
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, default="custom")
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="custom")
+    revenue: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    blocked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
