@@ -1,47 +1,250 @@
 {% extends "base.html" %}
 {% block title %}Events · MMP{% endblock %}
 {% block content %}
-<h1>Events</h1>
-<p class="sub">Event volume by name, over the selected period.</p>
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Events</span></nav>
+    <h1>Events</h1>
+    <p class="sub">Monitor, understand and manage the events your app sends.</p>
+  </div>
+  {% if current_app %}
+    <div class="actions muted" style="font-size:12.5px">
+      <span class="pill plain">{{ current_app.name }}</span>
+      <span>{{ from_date }} → {{ to_date }}</span>
+    </div>
+  {% endif %}
+</div>
 
 {% include "partials/controls.html" %}
 
 {% if error %}
   {% include "partials/error.html" %}
-{% elif not events %}
+{% elif not apps %}
   <div class="card">
-    {% with title = "No events in this period",
-            hint = "Check that the SDK is initialised and the API key matches this environment." %}
+    {% with title = "No apps yet",
+            hint = "Register an app under Apps & SDK, then its events appear here as they arrive." %}
       {% include "partials/empty.html" %}
     {% endwith %}
   </div>
 {% else %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Event</th><th class="num">Count</th>
-          {# Not "unique devices for the period" — that is not derivable from
-             per-hour distinct counts, and claiming it would be a number that is
-             confidently wrong. #}
-          <th class="num">Peak hourly devices</th><th class="num">Revenue</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in events %}
-          <tr>
-            <td><code>{{ row.event_name }}</code></td>
-            <td class="num">{{ "{:,}".format(row.event_count) }}</td>
-            <td class="num">{{ "{:,}".format(row.peak_hourly_devices) }}</td>
-            <td class="num">{{ row.revenue_display }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  {% if notice %}
+    <div class="notice"><strong>{{ notice }}</strong></div>
+  {% endif %}
+
+  <div class="grid cols-4 kpis">
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 15V9m4 6V5m4 10v-4m4 4V7"/></svg></span>Events in period</div>
+      <div class="value">{{ period_total_display }}</div>
+      <div class="kpi-foot"><span class="muted">{{ from_date }} → {{ to_date }}</span></div>
+    </div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M4 10h8M4 14h10"/></svg></span>Distinct names, 30 days</div>
+      <div class="value">{{ distinct_display }}</div>
+      <div class="kpi-foot"><span class="muted">names that arrived</span></div>
+    </div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 4 5.5V10c0 3.5 2.6 6 6 7 3.4-1 6-3.5 6-7V5.5z"/><path d="M7.5 7.5l5 5"/></svg></span>Blocked</div>
+      <div class="value">{{ blocked_count }}</div>
+      <div class="kpi-foot"><span class="muted">dropped at the edge</span></div>
+    </div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.5"/><path d="M8 12.2c.4.6 1.1.9 2 .9 1.3 0 2-.6 2-1.4 0-1.9-3.8-.8-3.8-2.9 0-.8.7-1.4 1.8-1.4.8 0 1.4.3 1.8.8M10 6.5v1m0 5v1"/></svg></span>Revenue in period</div>
+      <div class="value">{{ period_revenue_display }}</div>
+      <div class="kpi-foot"><span class="muted">events that carried revenue</span></div>
+    </div>
   </div>
-  <p class="meta">
-    Peak hourly devices is the busiest single hour in the period, not a distinct
-    count across it — distinct counts cannot be summed across buckets.
-  </p>
+
+  <div class="split hero" style="margin-top:12px">
+    <div class="card flush" id="catalogue">
+      <div class="card-head hero-head">
+        <div>
+          <h2>Event catalogue</h2>
+          <div class="hint">Everything this app sends, plus the standard vocabulary. Names that arrive without a definition are shown too.</div>
+        </div>
+        {# Presentation-only filters: they hide rows already on this page and
+           ask the server for nothing. Without script every row stays visible. #}
+        <div class="hero-tools" data-catalogue-filters>
+          <label class="search-field">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.5 13.5 3 3"/></svg>
+            <input type="search" placeholder="Search events…" aria-label="Search events" data-filter-search>
+          </label>
+          <select aria-label="Category" data-filter-category>
+            <option value="">All categories</option>
+            {% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}
+          </select>
+          <select aria-label="Status" data-filter-status>
+            <option value="">All status</option>
+            <option value="receiving">receiving</option>
+            <option value="blocked">blocked</option>
+            <option value="not seen">not seen</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap flat">
+        <table class="catalogue">
+          <thead>
+            <tr>
+              <th>Event</th><th>Category</th><th>Last 14 days</th>
+              <th class="num">30-day count</th><th class="num">Revenue</th><th>Status</th><th class="right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in catalogue %}
+              {% set state = "blocked" if row.status == "blocked" else ("receiving" if row.count_30d else "not seen") %}
+              <tr class="{% if row.status == 'blocked' %}is-blocked{% endif %}"
+                  data-name="{{ (row.display_name ~ ' ' ~ row.name) | lower }}"
+                  data-category="{{ row.category }}" data-status="{{ state }}">
+                <td>
+                  <div class="ev-name">
+                    <strong>{{ row.display_name }}</strong>
+                    <span class="pill plain {{ row.kind }}">{{ row.kind }}</span>
+                    {% if row.sdk_owned %}<span class="pill plain">sent by SDK</span>{% endif %}
+                  </div>
+                  <code class="ev-code">{{ row.name }}</code>
+                  {% if row.description or row.properties %}
+                    <details class="ev-more">
+                      <summary>Details</summary>
+                      {% if row.description %}<p class="muted" style="margin:6px 0 8px">{{ row.description }}</p>{% endif %}
+                      {% if row.properties %}
+                        <dl class="kv">
+                          {% for prop in row.properties %}
+                            <dt><code>{{ prop.name }}</code> <span class="faint">{{ prop.type }}</span></dt>
+                            <dd>{{ prop.description }}</dd>
+                          {% endfor %}
+                        </dl>
+                      {% endif %}
+                      {% if not row.sdk_owned %}
+                        <div class="code-block" style="margin-top:10px">
+                          <pre class="code" id="snippet-{{ loop.index }}">{{ row.snippet }}</pre>
+                          <button type="button" class="secondary copy" data-copy="#snippet-{{ loop.index }}">Copy</button>
+                        </div>
+                      {% endif %}
+                    </details>
+                  {% endif %}
+                </td>
+                <td class="muted">{{ row.category }}</td>
+                <td><div class="spark-cell">{{ row.spark | safe }}</div></td>
+                <td class="num">{{ row.count_display }}</td>
+                <td class="num muted">{{ row.revenue_display }}</td>
+                <td>
+                  {% if state == "blocked" %}
+                    <span class="pill bad">blocked</span>
+                  {% elif state == "receiving" %}
+                    <span class="pill good">receiving</span>
+                  {% else %}
+                    <span class="pill plain">not seen</span>
+                  {% endif %}
+                </td>
+                <td class="right">
+                  <div class="row-actions">
+                    {% if row.defined %}
+                      <form method="post" action="/events/{{ row.id }}/status">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+                        {% if row.status == "blocked" %}
+                          <input type="hidden" name="status" value="active">
+                          <button class="secondary small" type="submit">Unblock</button>
+                        {% else %}
+                          <input type="hidden" name="status" value="blocked">
+                          <button class="danger small" type="submit">Block</button>
+                        {% endif %}
+                      </form>
+                      {% if row.kind == "custom" %}
+                        <form method="post" action="/events/{{ row.id }}/delete">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                          <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+                          <button class="ghost small" type="submit" title="Remove the definition. Events already stored are untouched.">Remove</button>
+                        </form>
+                      {% endif %}
+                    {% elif not row.sdk_owned %}
+                      {# Adopting a name makes it definable and blockable. #}
+                      <form method="post" action="/events/define">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+                        <input type="hidden" name="name" value="{{ row.name }}">
+                        <input type="hidden" name="category" value="{{ row.category if row.category in categories else 'custom' }}">
+                        <button class="secondary small" type="submit">Define</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if not catalogue %}
+          {% with title = "No events yet",
+                  hint = "Once the SDK sends its first event it appears here, alongside the standard vocabulary." %}
+            {% include "partials/empty.html" %}
+          {% endwith %}
+        {% endif %}
+        <div class="empty" id="catalogue-empty" hidden>
+          <strong>No events match</strong>
+          Clear the search or widen the filters above.
+        </div>
+      </div>
+      <div class="table-foot">
+        <span><span data-catalogue-count>{{ catalogue | length }}</span> events · {{ blocked_count }} blocked</span>
+        <span>Blocking drops an event at the tracker within thirty seconds; matching ignores capitalisation and separators.</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card config">
+        <div class="config-head">
+          <h2>Add a custom event</h2>
+          <p class="hint">Name it exactly as the app will send it. Standard names are recognised automatically.</p>
+        </div>
+        <form method="post" action="/events/define" class="stack" style="gap:12px">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+          <div class="field">
+            <label for="ev_name">Event name</label>
+            <input id="ev_name" name="name" required maxlength="120" placeholder="withdrawal_requested" class="mono-input" style="width:100%">
+          </div>
+          <div class="field">
+            <label for="ev_display">Display name <span class="faint">(optional)</span></label>
+            <input id="ev_display" name="display_name" maxlength="120" placeholder="Withdrawal requested" style="width:100%">
+          </div>
+          <div class="field">
+            <label for="ev_category">Category</label>
+            <select id="ev_category" name="category" style="width:100%">
+              {% for category in categories %}
+                <option value="{{ category }}" {% if category == "custom" %}selected{% endif %}>{{ category }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <label class="check"><input type="checkbox" name="revenue" value="1"> Carries revenue</label>
+          <div class="field">
+            <label for="ev_desc">Description <span class="faint">(optional)</span></label>
+            <textarea id="ev_desc" name="description" rows="3" maxlength="2000" placeholder="What this event means in your product."></textarea>
+          </div>
+          <button type="submit" style="width:100%">Define event</button>
+        </form>
+      </div>
+
+      <div class="card flush">
+        <div class="card-head"><h2>Activity in period</h2><span class="muted" style="font-size:12px">by name</span></div>
+        <div style="padding:10px 16px 14px">
+          {% if events %}
+            <div class="bars-list">
+              {% for row in events %}
+                <div class="bar-row">
+                  <code title="{{ row.event_name }}">{{ row.event_name }}</code>
+                  <div class="track"><i style="width:{{ row.share }}%"></i></div>
+                  <span class="n">{{ "{:,}".format(row.event_count) }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            {% with title = "No events in this period",
+                    hint = "Check that the SDK is initialised and the key matches this app and environment." %}
+              {% include "partials/empty.html" %}
+            {% endwith %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
 {% endif %}
 {% endblock %}

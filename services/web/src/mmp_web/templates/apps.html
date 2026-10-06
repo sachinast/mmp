@@ -1,119 +1,264 @@
 {% extends "base.html" %}
-{% block title %}Apps · MMP{% endblock %}
+{% block title %}Apps & SDK · MMP{% endblock %}
 {% block content %}
-<h1>Apps</h1>
-<p class="sub">Every app in this organisation, with its attribution configuration.</p>
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Apps &amp; SDK</span></nav>
+    <h1>Apps &amp; SDK</h1>
+    <p class="sub">Your apps, their keys, and everything needed to put the SDK in one.</p>
+  </div>
+  {% if selected_app %}
+    <div class="actions muted" style="font-size:12.5px">
+      <span class="pill plain">{{ selected_app.name }}</span>
+      <a class="btn secondary small" href="/live?app_id={{ selected_app.id }}">Open live view</a>
+    </div>
+  {% endif %}
+</div>
 
 {% if error %}
   {% include "partials/error.html" %}
 {% endif %}
 {% if notice %}
-  <div class="error" style="border-left-color: var(--good)">
-    <strong style="color: var(--good)">{{ notice }}</strong>
-  </div>
+  <div class="notice"><strong>{{ notice }}</strong></div>
 {% endif %}
 
 {% if new_key %}
   {# Shown here, in a response body, because this is the only time it exists.
      The server stores an HMAC of it and nothing can retrieve it again. #}
-  <div class="error" style="border-left-color: var(--warn)">
-    <strong style="color: var(--warn)">Copy this key now — it cannot be shown again</strong>
-    <p class="meta" style="margin-top:8px">
-      {{ new_key.name }} · {{ new_key.environment }} · {{ new_key.kind }}
-    </p>
-    <p style="margin-top:8px"><code>{{ new_key.api_key }}</code></p>
+  <div class="notice warn">
+    <strong>Copy this key now — it cannot be shown again</strong>
+    <p class="meta" style="margin-top:6px">{{ new_key.name }} · {{ new_key.environment }} · {{ new_key.kind }}</p>
+    <div class="code-block" style="margin-top:8px">
+      <pre class="code" id="new-key">{{ new_key.api_key }}</pre>
+      <button type="button" class="secondary copy" data-copy="#new-key">Copy</button>
+    </div>
     <p class="meta" style="margin-top:8px">
       An <code>sdk</code> key ships inside your app and is not a secret: it may only
       write events for this app. An <code>s2s</code> key is a secret and is used with
-      request signing. Only a hash of this value is stored, so there is no way to
-      reveal it later — if it is lost, rotate.
+      request signing. Only a hash of this value is stored — if it is lost, rotate.
     </p>
   </div>
 {% endif %}
 
-<div class="card" style="margin-bottom:18px">
-  <h2 style="margin-top:0">Add an app</h2>
-  <form class="inline" method="post" action="/apps">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div>
-      <label for="name">Name</label>
-      <input id="name" name="name" required maxlength="255" placeholder="Acme Shop">
+<div class="split hero">
+  <div class="stack">
+    <div class="card flush">
+      <div class="card-head">
+        <div>
+          <h2>Applications</h2>
+          <div class="hint">Open an app to make every page follow it; set it up to manage keys and the SDK.</div>
+        </div>
+        <span class="muted" style="font-size:12px">{{ apps | length }} app{{ "" if apps | length == 1 else "s" }}</span>
+      </div>
+      {% if not apps %}
+        {% with title = "No apps yet",
+                hint = "An app is the container for your tracking links, events and attributions. Add one on the right." %}
+          {% include "partials/empty.html" %}
+        {% endwith %}
+      {% else %}
+        <div class="table-wrap flat">
+          <table class="apps-table">
+            <thead>
+              <tr>
+                <th>App</th><th>Platform</th><th>Status</th>
+                <th class="num">Install window</th><th class="num">Event window</th><th class="right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for app in apps %}
+                <tr class="{% if selected_app and app.id == selected_app.id %}selected{% endif %}">
+                  <td>
+                    <div class="app-cell">
+                      <span class="app-avatar small" aria-hidden="true">{{ app.name[0] | upper }}</span>
+                      <div class="lines">
+                        <strong>{{ app.name }}</strong>
+                        <code class="ev-code">{{ app.android_package_name or app.ios_bundle_id or "—" }}</code>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="muted">{{ app.platform.replace("_", " ") }}</td>
+                  <td><span class="pill {{ app.status }}">{{ app.status }}</span></td>
+                  <td class="num">{{ app.install_window_days }}d</td>
+                  <td class="num">{{ app.event_window_days }}d</td>
+                  <td class="right">
+                    <div class="row-actions">
+                      <form method="post" action="/app/select">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="app_id" value="{{ app.id }}">
+                        <input type="hidden" name="next" value="/">
+                        <button class="small" type="submit">Open</button>
+                      </form>
+                      <a class="btn secondary small" href="/apps?app_id={{ app.id }}">Set up</a>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
     </div>
-    <div>
-      <label for="platform">Platform</label>
-      <select id="platform" name="platform">
-        <option value="android">Android</option>
-        <option value="ios">iOS</option>
-        <option value="cross_platform">Both</option>
-      </select>
-    </div>
-    <div>
-      <label for="identifier">Package name or bundle id</label>
-      <input id="identifier" name="identifier" size="26" placeholder="com.acme.shop">
-    </div>
-    <div>
-      <label for="install_window_days">Install window</label>
-      <input id="install_window_days" name="install_window_days" type="number"
-             value="7" min="1" max="30" style="width:72px">
-    </div>
-    <div>
-      <label for="event_window_days">Event window</label>
-      <input id="event_window_days" name="event_window_days" type="number"
-             value="30" min="1" max="365" style="width:72px">
-    </div>
-    <button type="submit">Create app</button>
-  </form>
-  <p class="meta">
-    The identifier cannot be corrected once traffic has been attributed against
-    it, so it is worth checking now. The windows are how long after a click an
-    install counts, and how long after an install an event counts.
-  </p>
-</div>
 
-{% if not apps %}
-  <div class="card">
-    {% with title = "No apps yet",
-            hint = "An app is the container for your tracking links, events and attributions." %}
-      {% include "partials/empty.html" %}
-    {% endwith %}
+    {% if selected_app %}
+      <div class="card flush" id="setup">
+        <div class="card-head">
+          <div>
+            <h2>SDK setup · {{ selected_app.name }}</h2>
+            <div class="hint">Five steps. Fifteen minutes if nothing is unusual.</div>
+          </div>
+          <a class="btn secondary small" href="/events?app_id={{ selected_app.id }}">Event catalogue</a>
+        </div>
+
+        <section class="step">
+          <div class="step-head"><span class="step-n">1</span><div><h3>Keys</h3><div class="hint">An <code>sdk</code> key for the app, an <code>s2s</code> key for your backend.</div></div></div>
+          <div class="step-body">
+            {% if keys %}
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Name</th><th>Kind</th><th>Env</th><th>Prefix</th><th>Status</th><th>Last used</th><th class="right">Actions</th></tr></thead>
+                  <tbody>
+                    {% for key in keys %}
+                      <tr>
+                        <td>{{ key.name }}</td>
+                        <td><span class="pill plain">{{ key.kind }}</span></td>
+                        <td><span class="pill plain {{ key.environment }}">{{ key.environment }}</span></td>
+                        <td class="mono">{{ key.key_prefix }}…</td>
+                        <td><span class="pill {{ key.status }}">{{ key.status }}</span></td>
+                        <td class="muted">{{ key.last_used_at[:16].replace("T", " ") if key.last_used_at else "never" }}</td>
+                        <td class="right">
+                          {% if key.status == "active" %}
+                            <div class="row-actions">
+                              <form method="post" action="/apps/{{ selected_app.id }}/keys/{{ key.id }}/rotate">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="secondary small" type="submit">Rotate</button>
+                              </form>
+                              <form method="post" action="/apps/{{ selected_app.id }}/keys/{{ key.id }}/revoke">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="danger small" type="submit">Revoke</button>
+                              </form>
+                            </div>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="hint">No keys yet. Issue one below; it is shown once.</p>
+            {% endif %}
+            <form method="post" action="/apps/{{ selected_app.id }}/keys" class="toolbar" style="margin-top:10px">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <div class="field"><label for="key_name">Name</label><input id="key_name" name="name" placeholder="production" size="14"></div>
+              <div class="field"><label for="key_kind">Kind</label>
+                <select id="key_kind" name="kind"><option value="sdk">sdk</option><option value="s2s">s2s</option></select></div>
+              <div class="field"><label for="key_env">Environment</label>
+                <select id="key_env" name="environment"><option value="prod">prod</option><option value="dev">dev</option></select></div>
+              <button type="submit">Issue key</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="step">
+          <div class="step-head"><span class="step-n">2</span><div><h3>Install and initialise</h3><div class="hint">React Native. Pass storage in — a measurement library is a guest in someone else's app — and a CSPRNG, which React Native does not ship.</div></div></div>
+          <div class="step-body stack" style="gap:8px">
+            <div class="code-block">
+              <pre class="code" id="snippet-install">npm install @mmp/react-native @react-native-async-storage/async-storage react-native-get-random-values</pre>
+              <button type="button" class="secondary copy" data-copy="#snippet-install">Copy</button>
+            </div>
+            <div class="code-block">
+              <pre class="code" id="snippet-init">import "react-native-get-random-values"; // must be the first import
+import { NativeModules } from "react-native";
+import { MMP, adaptKeyValueStore, createNativeBridge } from "@mmp/react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+await MMP.initialize(
+  { apiKey: "YOUR_SDK_KEY", endpoint: "{{ tracking_domain }}" },
+  {
+    storage: adaptKeyValueStore(AsyncStorage),
+    native: createNativeBridge(NativeModules.MmpNative),
+  },
+);</pre>
+              <button type="button" class="secondary copy" data-copy="#snippet-init">Copy</button>
+            </div>
+            <p class="meta" style="margin:0"><code>initialize</code> sends <code>install</code>, <code>app_open</code> and session events itself. Do not send them from <code>track()</code>.</p>
+          </div>
+        </section>
+
+        <section class="step">
+          <div class="step-head"><span class="step-n">3</span><div><h3>Track events</h3><div class="hint">Constants for every event this app defines or receives, so names in code match names in reports. Edit the list under <a href="/events?app_id={{ selected_app.id }}">Events</a>.</div></div></div>
+          <div class="step-body stack" style="gap:8px">
+            <div class="code-block">
+              <pre class="code" id="snippet-events">{{ event_constants }}</pre>
+              <button type="button" class="secondary copy" data-copy="#snippet-events">Copy</button>
+            </div>
+            <div class="code-block">
+              <pre class="code" id="snippet-track">await MMP.track(Events.ADD_TO_CART, { properties: { item_id: "A-1", quantity: 1 } });
+await MMP.track(Events.PURCHASE, { revenueMinor: 499, currency: "USD", properties: { order_id: "o-42" } });
+await MMP.setUserId("user-42"); // sends signup or login for you</pre>
+              <button type="button" class="secondary copy" data-copy="#snippet-track">Copy</button>
+            </div>
+            <p class="meta" style="margin:0">Money is integer minor units — cents, paise — with a currency. Floats are refused.</p>
+          </div>
+        </section>
+
+        <section class="step">
+          <div class="step-head"><span class="step-n">4</span><div><h3>Server to server</h3><div class="hint">For purchases you validate on your own backend. Uses an <code>s2s</code> key and a signed request; see the <a href="/export">API docs</a> for the signature.</div></div></div>
+          <div class="step-body">
+            <div class="code-block">
+              <pre class="code" id="snippet-s2s">curl -X POST {{ tracking_domain }}/v1/s2s/events \
+  -H "authorization: Bearer YOUR_S2S_KEY" \
+  -H "content-type: application/json" \
+  -H "x-mmp-timestamp: $(date +%s)" \
+  -H "x-mmp-signature: &lt;hmac-sha256 of METHOD\nPATH\nTIMESTAMP\nSHA256(body)&gt;" \
+  -d '{"events":[{"event_name":"purchase","anonymous_id":"device-abc","revenue_minor":499,"currency":"USD"}]}'</pre>
+              <button type="button" class="secondary copy" data-copy="#snippet-s2s">Copy</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="step last">
+          <div class="step-head"><span class="step-n">5</span><div><h3>Verify</h3><div class="hint">Launch the app, then open the <a href="/live?app_id={{ selected_app.id }}">live view</a>. The install appears within seconds — or the reason it was refused does.</div></div></div>
+        </section>
+      </div>
+    {% endif %}
   </div>
-{% else %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th><th>Platform</th><th>Identifier</th><th>Status</th>
-          <th class="num">Install window</th><th class="num">Event window</th>
-          <th>Key</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for app in apps %}
-          <tr>
-            <td>{{ app.name }}</td>
-            <td>{{ app.platform }}</td>
-            <td><code>{{ app.android_package_name or app.ios_bundle_id or "—" }}</code></td>
-            <td><span class="pill {{ app.status }}">{{ app.status }}</span></td>
-            <td class="num">{{ app.install_window_days }}d</td>
-            <td class="num">{{ app.event_window_days }}d</td>
-            <td>
-              <form method="post" action="/apps/{{ app.id }}/keys" class="inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <select name="kind" aria-label="Key kind">
-                  <option value="sdk">sdk</option>
-                  <option value="s2s">s2s</option>
-                </select>
-                <select name="environment" aria-label="Environment">
-                  <option value="prod">prod</option>
-                  <option value="dev">dev</option>
-                </select>
-                <button class="secondary" type="submit">Issue</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+
+  <div class="stack">
+    <div class="card config">
+      <div class="config-head">
+        <h2>Add an app</h2>
+        <p class="hint">The identifier cannot be corrected once traffic has been attributed against it.</p>
+      </div>
+      <form method="post" action="/apps" class="stack" style="gap:12px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field"><label for="name">Name</label><input id="name" name="name" required maxlength="255" placeholder="Acme Shop" style="width:100%"></div>
+        <div class="field"><label for="platform">Platform</label>
+          <select id="platform" name="platform" style="width:100%">
+            <option value="android">Android</option><option value="ios">iOS</option><option value="cross_platform">Both</option>
+          </select></div>
+        <div class="field"><label for="identifier">Package name or bundle id</label><input id="identifier" name="identifier" placeholder="com.acme.shop" class="mono-input" style="width:100%"></div>
+        <div class="toolbar">
+          <div class="field grow"><label for="install_window_days">Install window (days)</label>
+            <input id="install_window_days" name="install_window_days" type="number" value="7" min="1" max="30" style="width:100%"></div>
+          <div class="field grow"><label for="event_window_days">Event window (days)</label>
+            <input id="event_window_days" name="event_window_days" type="number" value="30" min="1" max="90" style="width:100%"></div>
+        </div>
+        <button type="submit" style="width:100%">Create app</button>
+      </form>
+      <p class="meta">The windows are how long after a click an install counts, and how long after an install an event counts.</p>
+    </div>
+    {% if selected_app %}
+      <div class="card flush">
+        <div class="card-head"><h2>Tracking endpoint</h2></div>
+        <dl class="kv endpoints">
+          <dt>Events</dt><dd><code>{{ tracking_domain }}/v1/events</code></dd>
+          <dt>Server to server</dt><dd><code>{{ tracking_domain }}/v1/s2s/events</code></dd>
+          <dt>Links</dt><dd><code>{{ tracking_domain }}/c/&lt;code&gt;</code></dd>
+          <dt>App id</dt><dd><code>{{ selected_app.id }}</code></dd>
+        </dl>
+      </div>
+    {% endif %}
   </div>
-{% endif %}
+</div>
 {% endblock %}

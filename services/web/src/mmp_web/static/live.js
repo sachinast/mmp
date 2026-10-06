@@ -26,6 +26,7 @@
   // the server's late-write margin draw it again on a busy app; remembering
   // everything forever would grow for as long as the tab is open.
   const MAX_REMEMBERED = 5000;
+  const MAX_NAME_CHIPS = 24;
   const KINDS = ["click", "install", "event", "postback", "rejected"];
 
   const rows = document.getElementById("live-rows");
@@ -34,12 +35,23 @@
   const pauseButton = document.getElementById("live-pause");
   const clearButton = document.getElementById("live-clear");
   const search = document.getElementById("live-search");
+  const names = document.getElementById("live-names");
+  const lastSeen = document.getElementById("live-last");
+  const drawerTitle = document.getElementById("drawer-title");
+  const drawerKind = document.getElementById("drawer-kind");
+  const drawerFacts = document.getElementById("drawer-facts");
+  const drawerJson = document.getElementById("drawer-json");
 
   // kind:id of everything drawn, so an item repeated by the server's late-write
   // margin is recognised and not drawn twice.
   const shown = new Map();
   const counts = Object.fromEntries(KINDS.map((kind) => [kind, 0]));
   const visibleKinds = new Set(KINDS);
+  // Event names with a chip, and the subset switched off. Empty "off" set means
+  // every name is shown, so the default needs no chips at all.
+  const knownNames = new Map();
+  const hiddenNames = new Set();
+  const items = new Map();
 
   let since = null;
   let paused = false;
@@ -47,6 +59,7 @@
   let timer = null;
   let delay = POLL_MS;
   let filterText = "";
+  let selected = null;
 
   // --- rendering --------------------------------------------------------
   function cell(text, className) {
@@ -84,9 +97,13 @@
         return [item.campaign || "organic",
           item.fraud_verdict && item.fraud_verdict !== "clean" ? `flagged ${item.fraud_verdict}` : null]
           .filter(Boolean).join(" · ");
-      case "event":
-        return [money(item.revenue_minor, item.currency), item.user_id ? `user ${item.user_id}` : null]
+      case "event": {
+        const props = item.details && item.details.properties ? Object.keys(item.details.properties) : [];
+        return [money(item.revenue_minor, item.currency), item.platform,
+          item.user_id ? `user ${item.user_id}` : null,
+          props.length ? `${props.length} propert${props.length === 1 ? "y" : "ies"}` : null]
           .filter(Boolean).join(" · ");
+      }
       case "postback":
         return [item.status, item.response_status ? `HTTP ${item.response_status}` : null,
           item.details && item.details.destination_host]
@@ -107,14 +124,53 @@
     }
   }
 
+  // The drawer: a few facts as a list, then everything as JSON. Both through
+  // textContent; the facts are built element by element.
+  function fact(label, value) {
+    if (value == null || value === "") return;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = String(value);
+    drawerFacts.append(dt, dd);
+  }
+
+  function showDetails(item, row) {
+    if (selected) selected.classList.remove("selected");
+    selected = row;
+    row.classList.add("selected");
+    drawerTitle.textContent = item.title || item.kind;
+    drawerKind.textContent = item.kind;
+    drawerKind.className = `live-kind live-kind-${item.kind}`;
+    drawerFacts.replaceChildren();
+    fact("Time", item.at ? new Date(item.at).toLocaleString() : null);
+    fact("Device", item.device);
+    fact("User", item.user_id);
+    fact("Platform", item.platform);
+    fact("Campaign", item.campaign);
+    fact("Country", item.country);
+    fact("Revenue", money(item.revenue_minor, item.currency));
+    fact("Status", item.status);
+    fact("Verdict", item.fraud_verdict);
+    const details = item.details || {};
+    for (const key of ["event_id", "click_id", "attribution_id", "occurred_at", "clock_skew_ms",
+      "app_version", "os_version", "device_model", "tracking_code", "deep_link",
+      "sub1", "sub2", "sub3", "destination_host", "attempts", "error", "detail", "events_in_batch"]) {
+      fact(key.replace(/_/g, " "), details[key]);
+    }
+    drawerJson.textContent = JSON.stringify(item, null, 2);
+    document.dispatchEvent(new CustomEvent("mmp:drawer"));
+  }
+
   function build(item) {
     const row = document.createElement("tr");
     row.className = "live-row";
     row.dataset.kind = item.kind;
+    row.dataset.name = item.kind === "event" ? String(item.title || "") : "";
     // Compared as numbers, not strings: an ISO timestamp with zero microseconds
     // has no fractional part at all, so string order is order by luck.
     row.dataset.at = String(Date.parse(item.at) || 0);
-    row.dataset.search = `${item.title || ""} ${item.device || ""}`.toLowerCase();
+    row.dataset.search = `${item.title || ""} ${item.device || ""} ${item.user_id || ""}`.toLowerCase();
     row.tabIndex = 0;
 
     const kind = document.createElement("td");
@@ -137,48 +193,73 @@
       row.classList.add("live-problem");
     }
 
-    const detailRow = document.createElement("tr");
-    detailRow.className = "live-details";
-    detailRow.hidden = true;
-    const detailCell = document.createElement("td");
-    detailCell.colSpan = 5;
-    const pre = document.createElement("pre");
-    pre.textContent = JSON.stringify(item, null, 2);
-    detailCell.appendChild(pre);
-    detailRow.appendChild(detailCell);
-
-    const toggle = () => {
-      detailRow.hidden = !detailRow.hidden;
-      row.setAttribute("aria-expanded", String(!detailRow.hidden));
-    };
-    row.addEventListener("click", toggle);
+    const open = () => showDetails(item, row);
+    row.addEventListener("click", open);
     row.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        toggle();
+        open();
       }
     });
-    return [row, detailRow];
+    return row;
   }
 
   function matches(row) {
-    return visibleKinds.has(row.dataset.kind) &&
-      (!filterText || row.dataset.search.includes(filterText));
+    if (!visibleKinds.has(row.dataset.kind)) return false;
+    if (row.dataset.kind === "event" && hiddenNames.has(row.dataset.name)) return false;
+    return !filterText || row.dataset.search.includes(filterText);
   }
 
   function applyFilters() {
     for (const row of rows.querySelectorAll("tr.live-row")) {
-      const show = matches(row);
-      row.hidden = !show;
-      if (!show) row.nextElementSibling.hidden = true;
+      row.hidden = !matches(row);
     }
+  }
+
+  // One chip per event name seen, so a noisy heartbeat event can be switched
+  // off while watching for the one that matters. Chips are made from
+  // textContent like everything else; the name is attacker-controlled text.
+  function noteName(item) {
+    if (item.kind !== "event" || !names) return;
+    const name = String(item.title || "");
+    if (!name) return;
+    if (knownNames.has(name)) {
+      const chip = knownNames.get(name);
+      chip.dataset.n = String(Number(chip.dataset.n) + 1);
+      chip.lastElementChild.textContent = chip.dataset.n;
+      return;
+    }
+    if (knownNames.size >= MAX_NAME_CHIPS) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.n = "1";
+    chip.setAttribute("aria-pressed", "true");
+    const label = document.createElement("span");
+    label.textContent = name;
+    label.className = "chip-name";
+    const n = document.createElement("span");
+    n.textContent = "1";
+    chip.append(label, n);
+    chip.addEventListener("click", () => {
+      const on = chip.getAttribute("aria-pressed") !== "true";
+      chip.setAttribute("aria-pressed", String(on));
+      if (on) hiddenNames.delete(name);
+      else hiddenNames.add(name);
+      applyFilters();
+    });
+    knownNames.set(name, chip);
+    names.appendChild(chip);
+    names.hidden = false;
+    const wrap = document.getElementById("live-names-wrap");
+    if (wrap) wrap.hidden = false;
   }
 
   // Newest first by the item's own time. Usually that is the top, but the
   // server re-reads a margin for late writes, so an item can legitimately arrive
   // older than something already shown — it goes where its time says.
   function insert(item) {
-    const [row, detailRow] = build(item);
+    const row = build(item);
     const at = Date.parse(item.at) || 0;
     let before = null;
     for (const existing of rows.querySelectorAll("tr.live-row")) {
@@ -188,23 +269,23 @@
       }
     }
     rows.insertBefore(row, before);
-    rows.insertBefore(detailRow, before);
     row.hidden = !matches(row);
     row.classList.add("live-new");
     setTimeout(() => row.classList.remove("live-new"), 1600);
+    noteName(item);
     return row;
   }
 
   function trim() {
     const all = rows.querySelectorAll("tr.live-row");
     for (let index = MAX_ROWS; index < all.length; index += 1) {
-      all[index].nextElementSibling.remove();
       all[index].remove();
     }
     // A Map iterates in insertion order, so the first keys are the oldest.
     for (const key of shown.keys()) {
       if (shown.size <= MAX_REMEMBERED) break;
       shown.delete(key);
+      items.delete(key);
     }
   }
 
@@ -213,7 +294,12 @@
       const target = root.querySelector(`[data-count="${kind}"]`);
       if (target) target.textContent = String(counts[kind]);
     }
-    empty.hidden = rows.querySelector("tr.live-row") !== null;
+    const any = rows.querySelector("tr.live-row") !== null;
+    empty.hidden = any;
+    if (lastSeen && any) {
+      const newest = rows.querySelector("tr.live-row");
+      lastSeen.textContent = `last activity ${time(new Date(Number(newest.dataset.at)).toISOString())}`;
+    }
   }
 
   function setStatus(state, text) {
@@ -257,7 +343,6 @@
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
       const body = await response.json();
       // Checked again after the awaits, not only before them. Pausing while a
       // request is in flight used to let its response redraw the table, set the
@@ -271,6 +356,7 @@
         if (shown.has(key)) continue;
         insert(item);
         shown.set(key, true);
+        items.set(key, item);
         if (item.kind in counts) counts[item.kind] += 1;
       }
       trim();

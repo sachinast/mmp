@@ -1,104 +1,134 @@
 {% extends "base.html" %}
 {% block title %}Attribution · MMP{% endblock %}
 {% block content %}
-<h1>Attribution</h1>
-<p class="sub">How installs were credited, and why.</p>
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Attribution</span></nav>
+    <h1>Attribution</h1>
+    <p class="sub">How installs were credited, and why — deterministic signals only, organic when none matched.</p>
+  </div>
+  {% if current_app %}
+    <div class="actions muted" style="font-size:12.5px">
+      <span class="pill plain">{{ current_app.name }}</span>
+      <span>{{ from_date }} → {{ to_date }}</span>
+    </div>
+  {% endif %}
+</div>
 
 {% include "partials/controls.html" %}
 
 {% if error %}
   {% include "partials/error.html" %}
 {% else %}
-  <div class="grid cols-4">
-    <div class="card stat">
-      <div class="label">Installs</div>
+  <div class="grid cols-4 kpis">
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v9m0 0 3-3m-3 3-3-3M4 14v3h12v-3"/></svg></span>Installs</div>
       <div class="value">{{ "{:,}".format(summary.total) }}</div>
+      <div class="kpi-foot"><span class="muted">in period</span></div>
     </div>
-    <div class="card stat">
-      <div class="label">Attributed</div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15 9 9l3 3 4-6"/><circle cx="16" cy="6" r="1.2"/></svg></span>Attributed</div>
       <div class="value">{{ "{:,}".format(summary.attributed) }}</div>
+      <div class="kpi-foot"><span class="muted">credited to a click</span></div>
     </div>
-    <div class="card stat">
-      <div class="label">Organic</div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.5"/><path d="M10 6.5v3.5l2.5 1.5"/></svg></span>Organic</div>
       <div class="value">{{ "{:,}".format(summary.organic) }}</div>
+      <div class="kpi-foot"><span class="muted">no signal matched</span></div>
     </div>
-    <div class="card stat">
-      <div class="label">Match rate</div>
-      <div class="value {% if summary.match_rate is none %}none{% endif %}">
-        {{ match_rate_display }}
-      </div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h12M10 4v12"/></svg></span>Match rate</div>
+      <div class="value {% if summary.match_rate is none %}none{% endif %}">{{ match_rate_display }}</div>
+      <div class="kpi-foot"><span class="muted">attributed over installs</span></div>
     </div>
   </div>
 
-  <h2>By method</h2>
-  {% if summary.by_method %}
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Method</th><th>What it means</th><th class="num">Installs</th></tr></thead>
-        <tbody>
+  <div class="split hero" style="margin-top:12px">
+    <div class="card flush">
+      <div class="card-head">
+        <div>
+          <h2>By method</h2>
+          <div class="hint">Strict precedence: Play Install Referrer, then a reported click id, then a device match. Nothing probabilistic.</div>
+        </div>
+      </div>
+      {% if summary.by_method %}
+        <div class="method-list">
           {% for row in summary.by_method %}
-            <tr>
-              <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
-              <td class="meta">{{ method_notes[row.method] }}</td>
-              <td class="num">{{ "{:,}".format(row.count) }}</td>
-            </tr>
+            <div class="method-row">
+              <div class="method-cell">
+                <span class="pill {{ row.method }}">{{ row.method }}</span>
+                <div class="hint">{{ method_notes[row.method] }}</div>
+              </div>
+              <div class="track"><i class="m-{{ row.method }}" style="width:{{ (row.count / summary.total * 100) | round(1) if summary.total else 0 }}%"></i></div>
+              <div class="method-n">
+                <strong>{{ "{:,}".format(row.count) }}</strong>
+                <span class="muted">{% if summary.total %}{{ (row.count / summary.total * 100) | round(0) | int }}%{% else %}—{% endif %}</span>
+              </div>
+            </div>
           {% endfor %}
-        </tbody>
-      </table>
+        </div>
+      {% else %}
+        {% with title = "No installs in this period",
+                hint = "Attribution appears once installs arrive with a referrer or a matching device." %}
+          {% include "partials/empty.html" %}
+        {% endwith %}
+      {% endif %}
     </div>
-  {% else %}
-    <div class="card">
-      {% with title = "No installs in this period",
-              hint = "Attribution appears once installs arrive with a referrer or a matching device." %}
-        {% include "partials/empty.html" %}
-      {% endwith %}
-    </div>
-  {% endif %}
 
-  <h2>Look up a device</h2>
-  <form class="inline card" method="get">
-    <input type="hidden" name="app_id" value="{{ selected_app_id }}">
-    <input type="hidden" name="from" value="{{ from_date }}">
-    <input type="hidden" name="to" value="{{ to_date }}">
-    <div style="flex:1; min-width:240px">
-      <label for="anonymous_id">Anonymous ID</label>
-      <input id="anonymous_id" name="anonymous_id" value="{{ anonymous_id or '' }}"
-             placeholder="the device identifier from the SDK">
+    <div class="card config">
+      <div class="config-head">
+        <h2>Look up a device</h2>
+        <p class="hint">The full attribution history for one anonymous id, including superseded decisions.</p>
+      </div>
+      <form method="get" class="stack" style="gap:12px">
+        <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+        <input type="hidden" name="from" value="{{ from_date }}">
+        <input type="hidden" name="to" value="{{ to_date }}">
+        <div class="field">
+          <label for="anonymous_id">Anonymous ID</label>
+          <input id="anonymous_id" name="anonymous_id" value="{{ anonymous_id or '' }}"
+                 placeholder="the device identifier from the SDK" class="mono-input" style="width:100%">
+        </div>
+        <button type="submit" style="width:100%">Look up</button>
+      </form>
     </div>
-    <button type="submit">Look up</button>
-  </form>
+  </div>
 
   {% if anonymous_id %}
-    {% if device_history %}
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Method</th><th>Campaign</th><th>Installed</th><th>Window</th><th>State</th></tr>
-          </thead>
-          <tbody>
-            {% for row in device_history %}
-              <tr>
-                <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
-                <td><code>{{ row.campaign_id or "—" }}</code></td>
-                <td class="meta">{{ row.installed_at }}</td>
-                <td class="num">{{ row.window_days }}d</td>
-                {# Superseded rows are shown, not hidden. "It used to say organic
-                   and now it says Meta" has to be answerable from the record. #}
-                <td>{% if row.superseded_by %}<span class="pill">superseded</span>
-                    {% else %}<span class="pill active">current</span>{% endif %}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    <div class="card flush" style="margin-top:12px">
+      <div class="card-head">
+        <h2>Device <code class="ev-code">{{ anonymous_id }}</code></h2>
+        <span class="muted" style="font-size:12px">{{ device_history | length }} decision{{ "" if device_history | length == 1 else "s" }}</span>
       </div>
-    {% else %}
-      <div class="card">
+      {% if device_history %}
+        <div class="table-wrap flat">
+          <table class="history-table">
+            <thead>
+              <tr><th>Method</th><th>Campaign</th><th>Installed</th><th class="num">Window</th><th>State</th></tr>
+            </thead>
+            <tbody>
+              {% for row in device_history %}
+                <tr class="{% if row.superseded_by %}is-superseded{% endif %}">
+                  <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
+                  <td class="mono muted">{{ row.campaign_id or "—" }}</td>
+                  <td class="mono muted">{{ row.installed_at[:19].replace("T", " ") if row.installed_at else "—" }}</td>
+                  <td class="num">{{ row.window_days }}d</td>
+                  {# Superseded rows are shown, not hidden. "It used to say organic
+                     and now it says Meta" has to be answerable from the record. #}
+                  <td>{% if row.superseded_by %}<span class="pill plain">superseded</span>
+                      {% else %}<span class="pill good">current</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
         {% with title = "No attribution for that device",
                 hint = "Either the install has not arrived yet, or the identifier does not match." %}
           {% include "partials/empty.html" %}
         {% endwith %}
-      </div>
-    {% endif %}
+      {% endif %}
+    </div>
   {% endif %}
 {% endif %}
 {% endblock %}

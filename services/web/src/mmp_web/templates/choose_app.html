@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Choose an app · MMP{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Choose an app</h1>
+    <p class="sub">Every page follows the app you pick here. Switch any time from the top of the sidebar.</p>
+  </div>
+  <div class="actions"><a class="btn secondary small" href="/apps">Manage apps</a></div>
+</div>
+
+<div class="grid cols-3 app-grid">
+  {% for app in apps %}
+    <form class="card app-card" method="post" action="/app/select">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="app_id" value="{{ app.id }}">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <div class="app-card-head">
+        <span class="app-avatar" aria-hidden="true">{{ app.name[0] | upper }}</span>
+        <div class="lines">
+          <strong>{{ app.name }}</strong>
+          <code>{{ app.android_package_name or app.ios_bundle_id or "—" }}</code>
+        </div>
+      </div>
+      <div class="app-card-meta">
+        <span class="pill plain">{{ app.platform.replace("_", " ") }}</span>
+        <span class="pill {{ app.status }}">{{ app.status }}</span>
+      </div>
+      <button type="submit">Open</button>
+    </form>
+  {% endfor %}
+</div>
+{% endblock %}

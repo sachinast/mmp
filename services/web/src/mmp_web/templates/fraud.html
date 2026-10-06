@@ -1,116 +1,137 @@
 {% extends "base.html" %}
 {% block title %}Fraud · MMP{% endblock %}
 {% block content %}
-<h1>Fraud signals</h1>
-<p class="sub">
-  Rule-based, with stated thresholds. Nothing here changes an attribution —
-  flagged installs are still attributed and still counted everywhere else.
-</p>
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Fraud</span></nav>
+    <h1>Fraud signals</h1>
+    <p class="sub">Rule-based, with stated thresholds. Nothing here changes an attribution — flagged installs are still attributed and still counted everywhere else.</p>
+  </div>
+  {% if current_app %}
+    <div class="actions muted" style="font-size:12.5px">
+      <span class="pill plain">{{ current_app.name }}</span>
+      <span>{{ from_date }} → {{ to_date }}</span>
+    </div>
+  {% endif %}
+</div>
 
 {% include "partials/controls.html" %}
 
 {% if error %}
   {% include "partials/error.html" %}
 {% else %}
-  <div class="grid cols-4">
-    <div class="card stat">
-      <div class="label">Findings</div>
+  <div class="grid cols-4 kpis">
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 4 5.5V10c0 3.5 2.6 6 6 7 3.4-1 6-3.5 6-7V5.5z"/><path d="M10 7v4m0 2.5v.5"/></svg></span>Findings</div>
       <div class="value">{{ findings | length }}</div>
+      <div class="kpi-foot"><span class="muted">per link, per rule, per window</span></div>
     </div>
-    <div class="card stat">
-      <div class="label">Flagged installs</div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4v13M5 4h9l-2 3 2 3H5"/></svg></span>Flagged installs</div>
       <div class="value">{{ flagged | length }}</div>
+      <div class="kpi-foot"><span class="muted">scored by per-install rules</span></div>
     </div>
     {# Zero renders as zero. An em dash means "undefined" everywhere else on
        this dashboard, and "no installs were flagged" is a real answer rather
        than a missing one — showing them differently in the same row invites
        exactly the wrong reading. #}
-    <div class="card stat">
-      <div class="label">Fraudulent</div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico bad" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.5"/><path d="m7.5 7.5 5 5m0-5-5 5"/></svg></span>Fraudulent</div>
       <div class="value">{{ fraudulent }}</div>
+      <div class="kpi-foot"><span class="muted">verdict: fraudulent</span></div>
     </div>
-    <div class="card stat">
-      <div class="label">Suspicious</div>
+    <div class="card stat kpi compact">
+      <div class="label"><span class="kpi-ico warn" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 17 16H3z"/><path d="M10 8v4m0 2v.5"/></svg></span>Suspicious</div>
       <div class="value">{{ suspicious }}</div>
+      <div class="kpi-foot"><span class="muted">verdict: suspicious</span></div>
     </div>
   </div>
 
-  <h2>Traffic findings</h2>
-  <p class="sub">
-    One row per link, per rule, per window. Written by an hourly sweep and
-    cleared when a link stops misbehaving — a finding left standing after the
-    behaviour stopped is worse than no finding.
-  </p>
-  {% if not findings %}
-    <div class="card">
+  <div class="card flush" style="margin-top:12px">
+    <div class="card-head">
+      <div>
+        <h2>Traffic findings</h2>
+        <div class="hint">One row per link, per rule, per window. Written by an hourly sweep and cleared when a link stops misbehaving — a finding left standing after the behaviour stopped is worse than no finding.</div>
+      </div>
+      <span class="muted" style="font-size:12px">{{ findings | length }} finding{{ "" if findings | length == 1 else "s" }}</span>
+    </div>
+    {% if not findings %}
       {% with title = "No findings in this range",
               hint = "Traffic-level rules — flooding, click farms, device replay — found nothing to report." %}
         {% include "partials/empty.html" %}
       {% endwith %}
-    </div>
-  {% else %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Rule</th><th>Link</th><th>Campaign</th>
-            <th>What was found</th><th>Window</th><th class="num">Severity</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for finding in findings %}
+    {% else %}
+      <div class="table-wrap flat">
+        <table class="fraud-table">
+          <thead>
             <tr>
-              <td><span class="pill {{ severity_class(finding.severity) }}">{{ finding.rule }}</span></td>
-              <td>{% if finding.tracking_code %}<code>{{ finding.tracking_code }}</code>{% else %}<span class="pill">app-wide</span>{% endif %}</td>
-              <td>{{ finding.campaign_name or '—' }}</td>
-              {# The sentence stored with the finding, not one regenerated now:
-                 the thresholds it quotes may since have changed, and a finding
-                 has to say what it said when it was made. #}
-              <td>{{ finding.detail }}</td>
-              <td class="meta">{{ finding.window_start[:10] }} → {{ finding.window_end[:10] }}</td>
-              <td class="num">{{ finding.severity }}</td>
+              <th>Rule</th><th>Link</th><th>Campaign</th>
+              <th>What was found</th><th>Window</th><th class="num">Severity</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
+          </thead>
+          <tbody>
+            {% for finding in findings %}
+              <tr>
+                <td><span class="pill {{ severity_class(finding.severity) }}">{{ finding.rule }}</span></td>
+                <td>{% if finding.tracking_code %}<code class="ev-code">{{ finding.tracking_code }}</code>{% else %}<span class="pill plain">app-wide</span>{% endif %}</td>
+                <td class="muted">{{ finding.campaign_name or '—' }}</td>
+                {# The sentence stored with the finding, not one regenerated now:
+                   the thresholds it quotes may since have changed, and a finding
+                   has to say what it said when it was made. #}
+                <td class="finding-detail">{{ finding.detail }}</td>
+                <td class="mono muted">{{ finding.window_start[:10] }} → {{ finding.window_end[:10] }}</td>
+                <td class="num">
+                  <span class="sev"><i class="{{ severity_class(finding.severity) }}" style="width:{{ finding.severity }}%"></i></span>
+                  {{ finding.severity }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
 
-  <h2>Flagged installs</h2>
-  <p class="sub">
-    Individual attributions the per-install rules scored. This view filters to
-    flagged rows; every reporting page still counts them.
-  </p>
-  {% if not flagged %}
-    <div class="card">
+  <div class="card flush" style="margin-top:12px">
+    <div class="card-head">
+      <div>
+        <h2>Flagged installs</h2>
+        <div class="hint">Individual attributions the per-install rules scored. This view filters to flagged rows; every reporting page still counts them.</div>
+      </div>
+      <span class="muted" style="font-size:12px">{{ flagged | length }} install{{ "" if flagged | length == 1 else "s" }}</span>
+    </div>
+    {% if not flagged %}
       {% with title = "No flagged installs in this range",
               hint = "Click-to-install gaps, bot clicks and late conversions all looked ordinary." %}
         {% include "partials/empty.html" %}
       {% endwith %}
-    </div>
-  {% else %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Installed</th><th>Method</th><th>Verdict</th>
-            <th>Rules that fired</th><th class="num">Score</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for install in flagged %}
+    {% else %}
+      <div class="table-wrap flat">
+        <table class="fraud-table">
+          <thead>
             <tr>
-              <td class="meta">{{ install.installed_at[:19] | replace('T', ' ') }}</td>
-              <td><span class="pill {{ install.method }}">{{ install.method }}</span></td>
-              <td><span class="pill {{ verdict_class(install.fraud_verdict) }}">{{ install.fraud_verdict }}</span></td>
-              <td>{% for rule in install.rules %}<span class="pill">{{ rule }}</span> {% endfor %}</td>
-              <td class="num">{{ install.fraud_score }}</td>
+              <th>Installed</th><th>Method</th><th>Verdict</th>
+              <th>Rules that fired</th><th class="num">Score</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
+          </thead>
+          <tbody>
+            {% for install in flagged %}
+              <tr>
+                <td class="mono muted">{{ install.installed_at[:19] | replace('T', ' ') }}</td>
+                <td><span class="pill {{ install.method }}">{{ install.method }}</span></td>
+                <td><span class="pill {{ verdict_class(install.fraud_verdict) }}">{{ install.fraud_verdict }}</span></td>
+                <td><div class="rule-pills">{% for rule in install.rules %}<span class="pill plain">{{ rule }}</span>{% endfor %}</div></td>
+                <td class="num">
+                  <span class="sev"><i class="{{ verdict_class(install.fraud_verdict) }}" style="width:{{ [install.fraud_score, 100] | min }}%"></i></span>
+                  {{ install.fraud_score }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
 
   <p class="meta">
     Thresholds are reasoned, not measured against labelled traffic. False

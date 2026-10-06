@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,24 +37,43 @@ from mmp_core import (
     service_lifespan,
 )
 from mmp_web.client import CSRF_COOKIE, SESSION_COOKIE, ApiClient, ApiError, Unauthorized
-from mmp_web.formatting import bar_chart, count, default_range, money, parse_date, percentage
+from mmp_web.formatting import (
+    CHART_METRICS,
+    count,
+    default_range,
+    delta,
+    money,
+    parse_date,
+    percentage,
+    sparkline,
+    volume_chart,
+)
 
 log = get_logger(__name__)
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# The selected app ("project"), remembered per browser. A convenience, not a
+# security boundary: every API call is still scoped by the session and by RLS,
+# and an id in this cookie that the user cannot see is simply ignored.
+APP_COOKIE = "mmp_app"
+APP_COOKIE_MAX_AGE = 365 * 24 * 3600
+
 LIVE_SCRIPT = Path(__file__).parent / "static" / "live.js"
+APP_SCRIPT = Path(__file__).parent / "static" / "app.js"
 FAVICON = Path(__file__).parent / "static" / "favicon.svg"
 
-# Grouped, because ten flat items is a list to read rather than a structure to
-# navigate. The groups follow what someone is doing — looking at numbers,
-# checking whether to trust them, or changing configuration — rather than which
-# service happens to serve each page.
+# Grouped, because twelve flat items is a list to read rather than a structure
+# to navigate. Tracking comes first: the live view, the event catalogue and the
+# SDK setup are what someone integrating an app reaches for every day. The rest
+# follow what someone is doing — measuring, checking whether to trust the
+# numbers, or changing configuration — rather than which service serves them.
 NAV_ITEMS = [
-    {"key": "overview", "label": "Overview", "href": "/", "group": "Measure"},
-    {"key": "live", "label": "Live events", "href": "/live", "group": "Measure"},
-    {"key": "apps", "label": "Apps", "href": "/apps", "group": "Measure"},
+    {"key": "overview", "label": "Overview", "href": "/", "group": "Track"},
+    {"key": "live", "label": "Live events", "href": "/live", "group": "Track"},
+    {"key": "events", "label": "Events", "href": "/events", "group": "Track"},
+    {"key": "logs", "label": "Logs", "href": "/logs", "group": "Track"},
+    {"key": "apps", "label": "Apps & SDK", "href": "/apps", "group": "Track"},
     {"key": "links", "label": "Tracking links", "href": "/links", "group": "Measure"},
-    {"key": "events", "label": "Events", "href": "/events", "group": "Measure"},
     {"key": "attribution", "label": "Attribution", "href": "/attribution", "group": "Measure"},
     {"key": "fraud", "label": "Fraud", "href": "/fraud", "group": "Trust"},
     {"key": "skan", "label": "SKAdNetwork", "href": "/skan", "group": "Trust"},
@@ -108,6 +128,79 @@ def severity_class(severity: int | None) -> str:
 
 def verdict_class(verdict: str | None) -> str:
     return VERDICT_CLASSES.get(verdict or "", "sev-low")
+
+
+EVENT_CATEGORIES = (
+    "lifecycle",
+    "account",
+    "commerce",
+    "engagement",
+    "content",
+    "gaming",
+    "custom",
+)
+
+
+def event_constants(catalogue: list[dict[str, Any]]) -> str:
+    """A TypeScript constants object for the SDK, from the app's catalogue.
+
+    Only names in use or defined — the full standard vocabulary would be forty
+    lines of events the app does not send. SDK-owned names are left out too;
+    the SDK sends those itself and refuses them from track().
+    """
+    chosen = [
+        entry
+        for entry in catalogue
+        if (entry.get("defined") or entry.get("count_30d")) and not entry.get("sdk_owned")
+    ]
+    if not chosen:
+        chosen = [
+            entry
+            for entry in catalogue
+            if entry.get("name") in ("purchase", "add_to_cart", "view_item", "tutorial_complete")
+        ]
+    lines = ["export const Events = {"]
+    for entry in chosen:
+        name = str(entry["name"])
+        constant = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper() or "EVENT"
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'  {constant}: "{escaped}",')
+    lines.append("} as const;")
+    return "\n".join(lines)
+
+
+def _share(part: int, whole: int) -> int:
+    """A percentage of installs for the funnel bar, capped at 100: sessions can
+    exceed installs, and a bar that overflows its track says less than one
+    that is full."""
+    if not whole:
+        return 0
+    return min(100, round(part / whole * 100))
+
+
+def _share_display(part: int, whole: int) -> str:
+    return percentage(part / whole, places=0) if whole else "—"
+
+
+def track_snippet(entry: dict[str, Any]) -> str:
+    """A copy-ready SDK call for one catalogue entry.
+
+    Built from the event's recommended properties so what someone pastes into
+    their app matches what the dashboard says the event expects. Revenue events
+    carry money as integer minor units with a currency — the one shape the
+    tracker accepts.
+    """
+    name = entry["name"]
+    props = [p["name"] for p in entry.get("properties", [])]
+    fields = ", ".join(f"{p}: ..." for p in props[:3])
+    if entry.get("revenue"):
+        inner = 'revenueMinor: 499, currency: "USD"'
+        if fields:
+            inner += f", properties: {{ {fields} }}"
+        return f'await MMP.track("{name}", {{ {inner} }});'
+    if fields:
+        return f'await MMP.track("{name}", {{ properties: {{ {fields} }} }});'
+    return f'await MMP.track("{name}");'
 
 
 METHOD_NOTES = {
@@ -196,10 +289,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse(f"/login?next={target}", status_code=status.HTTP_303_SEE_OTHER)
 
     async def page_context(request: Request, api: ApiClient, active: str) -> dict[str, Any]:
-        """The shell every page needs: who is signed in, and where they are."""
+        """The shell every page needs: who is signed in, where they are, and
+        which app they are looking at.
+
+        The app is resolved once here, for every page, in this order: an
+        ``app_id`` in the URL (so a pasted link opens what it was looking at),
+        then the remembered cookie, then the only app if there is just one.
+        With several apps and no choice made, the page shows the chooser
+        instead of guessing — a dashboard that silently picks the first app is
+        how someone reads the wrong product's numbers.
+        """
         user = await api.get("/v1/auth/me")
         organizations = await api.get("/v1/organizations")
         current = next((org for org in organizations if org.get("role")), None)
+        apps = await api.get("/v1/apps") or []
+        valid = {app["id"] for app in apps}
+        requested = request.query_params.get("app_id")
+        remembered = request.cookies.get(APP_COOKIE)
+        if requested in valid:
+            current_app_id: str | None = requested
+        elif remembered in valid:
+            current_app_id = remembered
+        elif len(apps) == 1:
+            current_app_id = apps[0]["id"]
+        else:
+            current_app_id = None
+        request.state.apps = apps
+        request.state.current_app_id = current_app_id
+        # Remember a choice that arrived by URL, so the next page follows it.
+        request.state.set_app_cookie = (
+            current_app_id if current_app_id and current_app_id != remembered else None
+        )
         return {
             "request": request,
             "user": user,
@@ -208,22 +328,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "active": active,
             "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
             "request_id": request_id_var.get(),
+            "apps": apps,
+            "current_app": next((a for a in apps if a["id"] == current_app_id), None),
+            "app_chooser": current_app_id is None and len(apps) > 1,
+            "next_path": safe_next(
+                f"{request.url.path}?{request.url.query}" if request.url.query else request.url.path
+            ),
         }
 
     async def selection(
         request: Request, api: ApiClient
     ) -> tuple[list[dict[str, Any]], str | None, dt.date, dt.date]:
-        """Resolve the app and date range from the query string.
+        """The current app (see page_context) and the date range from the URL.
 
-        Defaults to the first app and the last seven days. The selection lives
-        in the URL rather than in a session, so a view can be bookmarked and
-        pasted to a colleague — which is how people actually share a number they
-        are worried about.
+        Dates default to the last seven days and live in the URL rather than in
+        a session, so a view can be bookmarked and pasted to a colleague —
+        which is how people actually share a number they are worried about.
         """
-        apps = await api.get("/v1/apps") or []
-        requested = request.query_params.get("app_id")
-        valid = {app["id"] for app in apps}
-        selected = requested if requested in valid else (apps[0]["id"] if apps else None)
+        apps = getattr(request.state, "apps", None)
+        if apps is None:
+            apps = await api.get("/v1/apps") or []
+        selected: str | None = getattr(request.state, "current_app_id", None)
+        if selected is None and len(apps) == 1:
+            selected = apps[0]["id"]
 
         default_from, default_to = default_range()
         from_date = parse_date(request.query_params.get("from"), default_from)
@@ -231,6 +358,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if to_date < from_date:
             from_date, to_date = to_date, from_date
         return apps, selected, from_date, to_date
+
+    def presets_for(
+        request: Request, app_id: str | None, from_date: dt.date, to_date: dt.date
+    ) -> list[dict[str, Any]]:
+        """Quick-range links for the controls: this page, a different range.
+
+        Links rather than buttons, so they work without script and can be
+        bookmarked like every other dashboard view.
+        """
+        today = dt.datetime.now(dt.UTC).date()
+        presets = []
+        for label, days in (("7d", 7), ("14d", 14), ("30d", 30), ("90d", 90)):
+            start = today - dt.timedelta(days=days)
+            query = urlencode({"app_id": app_id or "", "from": start, "to": today})
+            presets.append(
+                {
+                    "label": label,
+                    "href": f"{request.url.path}?{query}",
+                    "on": from_date == start and to_date == today,
+                }
+            )
+        return presets
 
     def _range_params(app_id: str, from_date: dt.date, to_date: dt.date) -> str:
         """The reporting endpoints take timestamps and refuse an unbounded range.
@@ -246,11 +395,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
+    # Pages that make sense without a chosen app: the sign-in, and the app list
+    # itself, which is where a new app is added.
+    CHOOSER_EXEMPT = {"login.html", "apps.html", "choose_app.html"}
+
     def render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
         request = context.pop("request")
-        return TEMPLATES.TemplateResponse(
+        if context.get("app_chooser") and name not in CHOOSER_EXEMPT:
+            name = "choose_app.html"
+        response = TEMPLATES.TemplateResponse(
             request=request, name=name, context=context, status_code=status_code
         )
+        remember = getattr(request.state, "set_app_cookie", None)
+        if remember:
+            response.set_cookie(
+                APP_COOKIE,
+                remember,
+                max_age=APP_COOKIE_MAX_AGE,
+                path="/",
+                httponly=True,
+                samesite="lax",
+            )
+        return response
+
+    @app.post("/app/select", include_in_schema=False)
+    async def select_app(
+        request: Request,
+        app_id: str = Form(...),
+        next: str = Form("/"),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        """Choose the app every page follows. The choice is checked against the
+        user's own apps before it is remembered."""
+        api = client_for(request)
+        target = safe_next(next)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            apps = await api.get("/v1/apps") or []
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError:
+            return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+        if app_id not in {a["id"] for a in apps}:
+            return RedirectResponse("/apps", status_code=status.HTTP_303_SEE_OTHER)
+        # A stale app_id in the destination would override the choice just made.
+        if "app_id=" in target:
+            target = target.split("?", 1)[0]
+        response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(
+            APP_COOKIE, app_id, max_age=APP_COOKIE_MAX_AGE, path="/", httponly=True, samesite="lax"
+        )
+        return response
 
     # ---------------------------------------------------------------- auth
     @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -337,12 +533,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "selected_app_id": app_id,
                 "from_date": from_date.isoformat(),
                 "to_date": to_date.isoformat(),
+                "presets": presets_for(request, app_id, from_date, to_date),
                 "error": None,
                 "stats": [],
                 "series": [],
                 "campaigns": [],
                 "chart": "",
                 "cache_state": None,
+                "install_rate_display": percentage(None),
+                "sessions_display": count(None),
+                "conversions_display": count(None),
+                "previous_range": "",
+                "metric": "events",
+                "metric_links": [],
+                "funnel": [],
             }
             if not app_id:
                 return render("overview.html", context)
@@ -351,32 +555,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data, headers = await api.get_with_headers(f"/v1/analytics/overview?{query}")
             campaigns = await api.get(f"/v1/analytics/campaigns?{query}&limit=25") or []
 
+            # The same span immediately before this one, so each tile can say
+            # whether the number moved. Read through the same cached endpoint;
+            # a comparison that needed its own query would be the first thing
+            # dropped under load.
+            metric = request.query_params.get("metric", "events")
+            if metric not in CHART_METRICS:
+                metric = "events"
+            span = (to_date - from_date).days + 1
+            previous_to = from_date - dt.timedelta(days=1)
+            previous_from = previous_to - dt.timedelta(days=span - 1)
+            previous = await api.get(
+                f"/v1/analytics/overview?app_id={app_id}&from={previous_from}&to={previous_to}"
+            )
+            before = (previous or {}).get("totals", {})
+
             totals = data["totals"]
+            series = data["series"]
+
+            def tile(label: str, key: str, display: str) -> dict[str, Any]:
+                return {
+                    "label": label,
+                    "value": totals[key],
+                    "display": display,
+                    "delta": delta(totals[key], before.get(key)),
+                    # Clicks come from a different rollup and are not in the
+                    # series, so that tile has no sparkline rather than a flat one.
+                    "spark": sparkline([int(point.get(key) or 0) for point in series])
+                    if key != "clicks"
+                    else "",
+                }
+
             context |= {
                 "stats": [
+                    tile("Installs", "installs", count(totals["installs"])),
+                    tile("Clicks", "clicks", count(totals["clicks"])),
+                    tile("Events", "events", count(totals["events"])),
+                    tile("Revenue", "revenue_minor", money(totals["revenue_minor"])),
+                ],
+                "install_rate_display": percentage(totals["install_rate"]),
+                "sessions_display": count(totals["sessions"]),
+                "conversions_display": count(totals["conversions"]),
+                "previous_range": f"{previous_from} to {previous_to}",
+                "series": data["series"],
+                "chart": volume_chart(data["series"], metric=metric),
+                "metric": metric,
+                "metric_links": [
                     {
-                        "label": "Clicks",
-                        "value": totals["clicks"],
-                        "display": count(totals["clicks"]),
-                    },
+                        "key": key,
+                        "label": label,
+                        "on": key == metric,
+                        "href": "/?"
+                        + urlencode(
+                            {"app_id": app_id, "from": from_date, "to": to_date, "metric": key}
+                        ),
+                    }
+                    for key, label in CHART_METRICS.items()
+                ],
+                # The funnel, as shares of installs. A share with no installs is
+                # undefined rather than zero, like every other rate here.
+                "funnel": [
                     {
                         "label": "Installs",
-                        "value": totals["installs"],
-                        "display": count(totals["installs"]),
+                        "value": count(totals["installs"]),
+                        "share": 100 if totals["installs"] else 0,
+                        "share_display": "100%" if totals["installs"] else "—",
                     },
                     {
-                        "label": "Install rate",
-                        "value": totals["install_rate"],
-                        "display": percentage(totals["install_rate"]),
+                        "label": "Sessions",
+                        "value": count(totals["sessions"]),
+                        "share": _share(totals["sessions"], totals["installs"]),
+                        "share_display": _share_display(totals["sessions"], totals["installs"]),
                     },
                     {
-                        "label": "Revenue",
-                        "value": totals["revenue_minor"],
-                        "display": money(totals["revenue_minor"]),
+                        "label": "Conversions",
+                        "value": count(totals["conversions"]),
+                        "share": _share(totals["conversions"], totals["installs"]),
+                        "share_display": _share_display(totals["conversions"], totals["installs"]),
                     },
                 ],
-                "series": data["series"],
-                "chart": bar_chart(data["series"]),
                 "campaigns": [
                     row
                     | {
@@ -393,17 +650,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ApiError as exc:
             return await _error_page(request, api, "overview", "overview.html", exc)
 
+    async def apps_context(request: Request, api: ApiClient, app_id: str | None) -> dict[str, Any]:
+        """The apps page: the list, and the setup panel for one of them.
+
+        The panel needs the app's keys and its event catalogue — the constants
+        it generates come from the catalogue, so names in code match names in
+        reports. Both are read as the signed-in user; a viewer who cannot list
+        keys sees the page without them.
+        """
+        context = await page_context(request, api, "apps")
+        apps = await api.get("/v1/apps") or []
+        selected = next((a for a in apps if a["id"] == app_id), None)
+        keys: list[dict[str, Any]] = []
+        constants = ""
+        if selected:
+            with contextlib.suppress(ApiError):
+                keys = await api.get(f"/v1/apps/{selected['id']}/keys") or []
+            catalogue = await api.get(f"/v1/apps/{selected['id']}/events") or []
+            constants = event_constants(catalogue)
+        context |= {
+            "apps": apps,
+            "selected_app": selected,
+            "keys": keys,
+            "event_constants": constants,
+            "tracking_domain": tracking_domain,
+            "notice": request.query_params.get("notice"),
+            "new_key": None,
+            "error": None,
+        }
+        return context
+
     @app.get("/apps", response_class=HTMLResponse, include_in_schema=False)
     async def apps_page(request: Request) -> Response:
         api = client_for(request)
         try:
-            context = await page_context(request, api, "apps")
-            context |= {
-                "apps": await api.get("/v1/apps") or [],
-                "notice": request.query_params.get("notice"),
-                "new_key": None,
-                "error": None,
-            }
+            context = await apps_context(request, api, request.query_params.get("app_id"))
+            if context["selected_app"] is None:
+                current = getattr(request.state, "current_app_id", None) or (
+                    context["apps"][0]["id"] if context["apps"] else None
+                )
+                if current:
+                    context = await apps_context(request, api, current)
             return render("apps.html", context)
         except Unauthorized:
             return login_redirect(request)
@@ -472,18 +759,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 f"/v1/apps/{app_id}/keys",
                 json={"name": name.strip() or "default", "environment": environment, "kind": kind},
             )
-            context = await page_context(request, api, "apps")
-            context |= {
-                "apps": await api.get("/v1/apps") or [],
-                "new_key": created,
-                "notice": None,
-                "error": None,
-            }
+            context = await apps_context(request, api, app_id)
+            context["new_key"] = created
             return render("apps.html", context)
         except Unauthorized:
             return login_redirect(request)
         except ApiError as exc:
-            return _notice("/apps", exc.detail)
+            return _notice(f"/apps?app_id={app_id}", exc.detail)
+
+    @app.post("/apps/{app_id}/keys/{key_id}/rotate", include_in_schema=False)
+    async def rotate_key_action(
+        request: Request, app_id: str, key_id: str, csrf_token: str = Form("")
+    ) -> Response:
+        """Rotation overlaps: the old key keeps working for a grace period so an
+        app in the field is never left without a credential. The new key is
+        shown once, in the body, like a created one."""
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/apps", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            rotated = await api.post(f"/v1/apps/{app_id}/keys/{key_id}/rotate")
+            context = await apps_context(request, api, app_id)
+            context["new_key"] = rotated
+            return render("apps.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice(f"/apps?app_id={app_id}", exc.detail)
+
+    @app.post("/apps/{app_id}/keys/{key_id}/revoke", include_in_schema=False)
+    async def revoke_key_action(
+        request: Request, app_id: str, key_id: str, csrf_token: str = Form("")
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/apps", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            await api.delete(f"/v1/apps/{app_id}/keys/{key_id}")
+            return _notice(f"/apps?app_id={app_id}", "Revoked the key. It stops working now.")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _notice(f"/apps?app_id={app_id}", exc.detail)
 
     @app.post("/campaigns", include_in_schema=False)
     async def create_campaign_action(
@@ -586,7 +903,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "selected_app_id": app_id,
                 "from_date": from_date.isoformat(),
                 "to_date": to_date.isoformat(),
+                "presets": presets_for(request, app_id, from_date, to_date),
+                "notice": request.query_params.get("notice"),
                 "events": [],
+                "catalogue": [],
+                "categories": EVENT_CATEGORIES,
+                "blocked_count": 0,
+                "distinct_display": count(None),
+                "period_total_display": count(None),
+                "period_revenue_display": money(None),
                 "error": None,
             }
             if app_id:
@@ -596,14 +921,205 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                     or []
                 )
-                context["events"] = [
-                    row | {"revenue_display": money(row["revenue_minor"])} for row in rows
-                ]
+                peak = max((row["event_count"] for row in rows), default=0) or 1
+                catalogue = await api.get(f"/v1/apps/{app_id}/events") or []
+                context |= {
+                    "events": [
+                        row
+                        | {
+                            "revenue_display": money(row["revenue_minor"]),
+                            "share": round(row["event_count"] / peak * 100, 1),
+                        }
+                        for row in rows
+                    ],
+                    "catalogue": [
+                        entry
+                        | {
+                            "spark": sparkline(entry["trend"]) if entry["count_30d"] else "",
+                            "count_display": count(entry["count_30d"]),
+                            "revenue_display": (
+                                money(entry["revenue_minor_30d"]) if entry["revenue"] else "—"
+                            ),
+                            "snippet": track_snippet(entry),
+                        }
+                        for entry in catalogue
+                    ],
+                    "blocked_count": sum(1 for e in catalogue if e["status"] == "blocked"),
+                    "distinct_display": count(sum(1 for e in catalogue if e["count_30d"])),
+                    "period_total_display": count(sum(row["event_count"] for row in rows)),
+                    "period_revenue_display": money(sum(row["revenue_minor"] for row in rows)),
+                }
             return render("events.html", context)
         except Unauthorized:
             return login_redirect(request)
         except ApiError as exc:
             return await _error_page(request, api, "events", "events.html", exc)
+
+    def _events_redirect(app_id: str, notice: str) -> RedirectResponse:
+        query = urlencode({"app_id": app_id, "notice": notice})
+        return RedirectResponse(f"/events?{query}", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post("/events/define", include_in_schema=False)
+    async def define_event_action(
+        request: Request,
+        app_id: str = Form(...),
+        name: str = Form(...),
+        display_name: str = Form(""),
+        category: str = Form("custom"),
+        description: str = Form(""),
+        revenue: str = Form(""),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/events", status_code=status.HTTP_303_SEE_OTHER)
+        body: dict[str, Any] = {
+            "name": name.strip(),
+            "category": category if category in EVENT_CATEGORIES else "custom",
+            "revenue": bool(revenue),
+        }
+        if display_name.strip():
+            body["display_name"] = display_name.strip()
+        if description.strip():
+            body["description"] = description.strip()
+        try:
+            await api.post(f"/v1/apps/{app_id}/events", json=body)
+            return _events_redirect(app_id, f"Defined {name.strip()}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _events_redirect(app_id, exc.detail)
+
+    @app.post("/events/{definition_id}/status", include_in_schema=False)
+    async def event_status_action(
+        request: Request,
+        definition_id: str,
+        app_id: str = Form(...),
+        status_value: str = Form(..., alias="status"),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/events", status_code=status.HTTP_303_SEE_OTHER)
+        if status_value not in ("active", "blocked"):
+            return _events_redirect(app_id, "unknown status")
+        try:
+            updated = await api.patch(
+                f"/v1/apps/{app_id}/events/{definition_id}", json={"status": status_value}
+            )
+            verb = "Blocked" if status_value == "blocked" else "Unblocked"
+            return _events_redirect(app_id, f"{verb} {updated['name']}")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _events_redirect(app_id, exc.detail)
+
+    @app.post("/events/{definition_id}/delete", include_in_schema=False)
+    async def event_delete_action(
+        request: Request,
+        definition_id: str,
+        app_id: str = Form(...),
+        csrf_token: str = Form(""),
+    ) -> Response:
+        api = client_for(request)
+        if not csrf_token or csrf_token != request.cookies.get(CSRF_COOKIE):
+            return RedirectResponse("/events", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            await api.delete(f"/v1/apps/{app_id}/events/{definition_id}")
+            return _events_redirect(app_id, "Removed the definition")
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return _events_redirect(app_id, exc.detail)
+
+    LOG_KINDS = ("events", "clicks", "installs")
+    LOG_DATASETS = {"events": "events", "clicks": "clicks", "installs": "attributions"}
+    LOG_FILTERS = {
+        "events": ("event_name", "platform", "anonymous_id", "user_id"),
+        "clicks": ("platform", "country"),
+        "installs": ("method", "verdict", "anonymous_id"),
+    }
+
+    @app.get("/logs", response_class=HTMLResponse, include_in_schema=False)
+    async def logs_page(request: Request) -> Response:
+        """Raw rows with filters and keyset paging, all carried in the URL.
+
+        The cursor is opaque to this layer: it is whatever the API returned,
+        passed back as given, so a bookmarked page three still means page three.
+        """
+        api = client_for(request)
+        kind = request.query_params.get("kind", "events")
+        if kind not in LOG_KINDS:
+            kind = "events"
+        try:
+            context = await page_context(request, api, "logs")
+            apps, app_id, from_date, to_date = await selection(request, api)
+            filters = {
+                name: request.query_params.get(name, "").strip() for name in LOG_FILTERS[kind]
+            }
+            cursor = request.query_params.get("cursor", "")
+            base = {"kind": kind, "app_id": app_id or "", "from": from_date, "to": to_date}
+            base |= {k: v for k, v in filters.items() if v}
+            context |= {
+                "apps": apps,
+                "selected_app_id": app_id,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "kind": kind,
+                "filters": filters,
+                "cursor": cursor,
+                "items": [],
+                "next_href": None,
+                "first_href": f"/logs?{urlencode(base)}",
+                "export_dataset": LOG_DATASETS[kind],
+                "tabs": [
+                    {
+                        "label": label,
+                        "href": "/logs?"
+                        + urlencode(
+                            {"kind": k, "app_id": app_id or "", "from": from_date, "to": to_date}
+                        ),
+                        "on": k == kind,
+                    }
+                    for k, label in (
+                        ("events", "Events"),
+                        ("clicks", "Clicks"),
+                        ("installs", "Installs"),
+                    )
+                ],
+                "verdict_class": verdict_class,
+                "error": None,
+            }
+            if app_id:
+                query = {"app_id": app_id, "from": from_date, "to": to_date, "limit": 50}
+                query |= {k: v for k, v in filters.items() if v}
+                if cursor:
+                    query["cursor"] = cursor
+                page = await api.get(f"/v1/logs/{kind}?{urlencode(query)}") or {}
+                items = page.get("items", [])
+                if kind == "events":
+                    items = [
+                        row
+                        | {
+                            "revenue_display": (
+                                money(row["revenue_minor"], row["currency"] or "USD")
+                                if row.get("revenue_minor") is not None
+                                else "—"
+                            ),
+                            "properties_json": json.dumps(row.get("properties") or {}, indent=2),
+                        }
+                        for row in items
+                    ]
+                context["items"] = items
+                if page.get("next_cursor"):
+                    context["next_href"] = (
+                        f"/logs?{urlencode(base | {'cursor': page['next_cursor']})}"
+                    )
+            return render("logs.html", context)
+        except Unauthorized:
+            return login_redirect(request)
+        except ApiError as exc:
+            return await _error_page(request, api, "logs", "logs.html", exc)
 
     @app.get("/attribution", response_class=HTMLResponse, include_in_schema=False)
     async def attribution_page(request: Request) -> Response:
@@ -625,6 +1141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "from_date": from_date.isoformat(),
                 "to_date": to_date.isoformat(),
                 "summary": empty,
+                "presets": presets_for(request, app_id, from_date, to_date),
                 "match_rate_display": percentage(None),
                 "method_notes": METHOD_NOTES,
                 "anonymous_id": anonymous_id,
@@ -753,6 +1270,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"cache-control": "no-cache", "x-content-type-options": "nosniff"},
         )
 
+    @app.get("/static/app.js", include_in_schema=False)
+    async def app_script() -> Response:
+        """The shell's own script: theme, copy buttons, the drawer. Same origin,
+        same rules as live.js — it never turns data into markup."""
+        return Response(
+            content=APP_SCRIPT.read_bytes(),
+            media_type="text/javascript",
+            headers={"cache-control": "no-cache", "x-content-type-options": "nosniff"},
+        )
+
     @app.get("/static/favicon.svg", include_in_schema=False)
     async def favicon() -> Response:
         """Same origin, like everything else this page loads.
@@ -782,6 +1309,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "flagged": [],
                 "fraudulent": 0,
                 "suspicious": 0,
+                "presets": presets_for(request, app_id, from_date, to_date),
                 "severity_class": severity_class,
                 "verdict_class": verdict_class,
                 "error": None,
@@ -820,6 +1348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "to_date": to_date.isoformat(),
                 "rows": [],
                 "caveat": "",
+                "presets": presets_for(request, app_id, from_date, to_date),
                 "total_winning": 0,
                 "total_non_winning": 0,
                 "total_suppressed": 0,
@@ -1122,6 +1651,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "to_date": to_date.isoformat(),
                 "datasets": EXPORT_DATASETS,
                 "api_base": api_base,
+                "presets": presets_for(request, app_id, from_date, to_date),
                 # The export API takes timestamps, not dates. `until` is the end
                 # of the chosen day rather than its start, or a one-day
                 # selection would export nothing.
@@ -1158,6 +1688,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # instead of being visibly unavailable.
                 "csrf_token": "",  # nosec B105 - an absent token, not a secret
                 "request_id": request_id_var.get(),
+                "apps": [],
+                "current_app": None,
+                "app_chooser": False,
+                "next_path": "/",
             }
         context |= {
             "error": True,
@@ -1183,6 +1717,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "by_method": [],
             },
             "match_rate_display": percentage(None),
+            "sessions_display": count(None),
+            "conversions_display": count(None),
+            "previous_range": "",
+            "presets": [],
+            "metric": "events",
+            "metric_links": [],
+            "funnel": [],
+            "catalogue": [],
+            "kind": "events",
+            "filters": {},
+            "cursor": "",
+            "items": [],
+            "next_href": None,
+            "first_href": "/logs",
+            "export_dataset": "events",
+            "tabs": [],
+            "selected_app": None,
+            "keys": [],
+            "event_constants": "",
+            "categories": EVENT_CATEGORIES,
+            "blocked_count": 0,
+            "distinct_display": count(None),
+            "period_total_display": count(None),
+            "period_revenue_display": money(None),
             "method_notes": METHOD_NOTES,
             "tracking_domain": tracking_domain,
             "cache_state": None,

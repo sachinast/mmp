@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from mmp_web.app import safe_next
 from mmp_web.formatting import bar_chart, count, money, percentage
@@ -718,7 +720,7 @@ def test_the_navigation_is_a_sidebar_with_grouped_sections():
     from mmp_web.app import NAV_ITEMS
 
     groups = [item["group"] for item in NAV_ITEMS]
-    assert set(groups) == {"Measure", "Trust", "Configure"}
+    assert set(groups) == {"Track", "Measure", "Trust", "Configure"}
     # Items must be ordered so each group is contiguous — the template emits a
     # heading whenever the group changes, so a stray item would print its
     # heading twice.
@@ -1199,3 +1201,186 @@ async def test_the_favicon_is_served_from_this_origin(signed_in):
 
     page = await signed_in["client"].get("/")
     assert '<link rel="icon" href="/static/favicon.svg"' in page.text
+
+
+# --- the event catalogue ---------------------------------------------------
+async def test_the_events_page_lists_the_catalogue_and_defines_an_event(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Catalogue Dash", "com.example.catalogue")
+    web = signed_in["client"]
+
+    page = await web.get(f"/events?app_id={app['id']}")
+    assert page.status_code == 200
+    # Standard vocabulary, with its documentation, is shown before anything arrives.
+    assert "add_to_cart" in page.text
+    assert "sent by SDK" in page.text
+    assert "MMP.track(&#34;purchase&#34;" in page.text or 'MMP.track("purchase"' in page.text
+
+    defined = await web.post(
+        "/events/define",
+        data={
+            "csrf_token": web.cookies["mmp_csrf"],
+            "app_id": app["id"],
+            "name": "withdrawal_requested",
+            "display_name": "Withdrawal requested",
+            "category": "custom",
+            "description": "User asked to cash out",
+        },
+    )
+    assert defined.status_code == 303
+    assert "Defined+withdrawal_requested" in defined.headers["location"]
+
+    page = await web.get(f"/events?app_id={app['id']}")
+    assert "Withdrawal requested" in page.text
+    assert "withdrawal_requested" in page.text
+
+    # Block it through the page, and the API's own view agrees.
+    rows = await api_client.get(f"/v1/apps/{app['id']}/events")
+    definition = next(r for r in rows.json() if r["name"] == "withdrawal_requested")
+    blocked = await web.post(
+        f"/events/{definition['id']}/status",
+        data={"csrf_token": web.cookies["mmp_csrf"], "app_id": app["id"], "status": "blocked"},
+    )
+    assert blocked.status_code == 303
+    page = await web.get(f"/events?app_id={app['id']}")
+    assert "Unblock" in page.text
+    rows = await api_client.get(f"/v1/apps/{app['id']}/events")
+    assert (
+        next(r for r in rows.json() if r["name"] == "withdrawal_requested")["status"] == "blocked"
+    )
+
+
+async def test_defining_an_event_without_a_csrf_token_does_nothing(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "CSRF Dash", "com.example.csrf")
+    web = signed_in["client"]
+    response = await web.post("/events/define", data={"app_id": app["id"], "name": "sneaky"})
+    assert response.status_code == 303
+    rows = await api_client.get(f"/v1/apps/{app['id']}/events")
+    assert not any(r["name"] == "sneaky" for r in rows.json())
+
+
+# --- the SDK setup panel -----------------------------------------------------
+async def test_the_apps_page_shows_setup_for_the_selected_app(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Setup Dash", "com.example.setup")
+    web = signed_in["client"]
+    page = await web.get(f"/apps?app_id={app['id']}")
+    assert page.status_code == 200
+    assert "SDK setup" in page.text
+    assert "Setup Dash" in page.text
+    # The tracking endpoint the SDK must be pointed at comes from settings.
+    assert "https://track.test" in page.text
+    # Constants are generated from the catalogue, never a placeholder key.
+    assert "export const Events" in page.text
+    assert "PURCHASE" in page.text
+    assert "YOUR_SDK_KEY" in page.text, "the snippet carries a placeholder, not a real key"
+    # With no app chosen the first one is set up rather than nothing.
+    first = await web.get("/apps")
+    assert "SDK setup" in first.text
+
+
+async def test_revoking_a_key_from_the_page_stops_it_working(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Revoke Dash", "com.example.revoke")
+    web = signed_in["client"]
+    csrf = web.cookies["mmp_csrf"]
+    issued = await web.post(
+        f"/apps/{app['id']}/keys",
+        data={"csrf_token": csrf, "name": "to-revoke", "kind": "sdk", "environment": "prod"},
+    )
+    assert issued.status_code == 200
+    keys = (await api_client.get(f"/v1/apps/{app['id']}/keys")).json()
+    key = next(k for k in keys if k["name"] == "to-revoke")
+    assert "Revoke" in issued.text
+
+    revoked = await web.post(
+        f"/apps/{app['id']}/keys/{key['id']}/revoke", data={"csrf_token": csrf}
+    )
+    assert revoked.status_code == 303
+    assert "Revoked" in revoked.headers["location"]
+    keys = (await api_client.get(f"/v1/apps/{app['id']}/keys")).json()
+    assert next(k for k in keys if k["id"] == key["id"])["status"] == "revoked"
+
+
+async def test_the_live_page_has_a_drawer_and_name_filters(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Drawer Dash", "com.example.drawer")
+    page = await signed_in["client"].get(f"/live?app_id={app['id']}")
+    assert 'class="drawer"' in page.text
+    assert 'id="live-names"' in page.text
+    assert "Waiting for the first event" in page.text
+
+
+def test_the_shell_script_never_turns_data_into_markup():
+    """app.js runs on every page; the same rule as live.js applies."""
+    from pathlib import Path
+
+    source = Path("services/web/src/mmp_web/static/app.js").read_text()
+    code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("//"))
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert sink not in code, f"app.js uses {sink}"
+
+
+# --- logs ----------------------------------------------------------------------
+async def test_the_logs_page_renders_each_kind_with_its_filters(signed_in, api_client):
+    app = await _with_an_app(signed_in, api_client, "Logs Dash", "com.example.logs")
+    web = signed_in["client"]
+    for kind, control in (("events", "event_name"), ("clicks", "country"), ("installs", "verdict")):
+        page = await web.get(f"/logs?kind={kind}&app_id={app['id']}")
+        assert page.status_code == 200, page.text
+        assert "Nothing matches" in page.text
+        assert f'name="{control}"' in page.text
+        assert "Export CSV" in page.text
+    # An unknown kind falls back to events rather than erroring.
+    assert (await web.get(f"/logs?kind=nope&app_id={app['id']}")).status_code == 200
+
+
+# --- the app every page follows -------------------------------------------------
+async def test_a_chosen_app_is_remembered_across_pages(signed_in, api_client):
+    web = signed_in["client"]
+    first = await _with_an_app(signed_in, api_client, "First App", "com.example.first")
+    second = await _with_an_app(signed_in, api_client, "Second App", "com.example.second")
+
+    # Two apps and no choice yet: the overview asks rather than guessing.
+    chooser = await web.get("/")
+    assert chooser.status_code == 200
+    assert "Choose an app" in chooser.text
+    assert "First App" in chooser.text and "Second App" in chooser.text
+
+    chosen = await web.post(
+        "/app/select",
+        data={"csrf_token": web.cookies["mmp_csrf"], "app_id": second["id"], "next": "/events"},
+    )
+    assert chosen.status_code == 303
+    assert chosen.headers["location"] == "/events"
+    assert web.cookies.get("mmp_app") == second["id"]
+
+    # Every page now follows it, with no app_id in the URL.
+    for path in ("/", "/events", "/logs", "/live", "/apps"):
+        page = await web.get(path)
+        assert page.status_code == 200, path
+        assert "Choose an app" not in page.text, path
+        assert f'<option value="{second["id"]}" selected' in page.text, path
+    live = await web.get("/live")
+    assert f'data-app-id="{second["id"]}"' in live.text
+
+    # A pasted link with an app_id still opens that app, and becomes the choice.
+    pasted = await web.get(f"/events?app_id={first['id']}")
+    assert f'<option value="{first["id"]}" selected' in pasted.text
+    assert web.cookies.get("mmp_app") == first["id"]
+
+
+async def test_selecting_someone_elses_app_is_refused(signed_in, api_client):
+    web = signed_in["client"]
+    await _with_an_app(signed_in, api_client, "Mine", "com.example.mine")
+    response = await web.post(
+        "/app/select",
+        data={"csrf_token": web.cookies["mmp_csrf"], "app_id": str(uuid.uuid4()), "next": "/"},
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/apps"
+    assert web.cookies.get("mmp_app") is None
+
+
+async def test_the_only_app_is_chosen_automatically(signed_in, api_client):
+    web = signed_in["client"]
+    app = await _with_an_app(signed_in, api_client, "Only App", "com.example.only")
+    page = await web.get("/events")
+    assert "Choose an app" not in page.text
+    assert f'<option value="{app["id"]}" selected' in page.text

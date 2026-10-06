@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Logs · MMP{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Logs</span></nav>
+    <h1>Logs</h1>
+    <p class="sub">Every event, click and install as stored — filterable, paged, exportable.</p>
+  </div>
+  <div class="actions muted" style="font-size:12.5px">
+    {% if current_app %}<span class="pill plain">{{ current_app.name }}</span>{% endif %}
+    {% if selected_app_id %}
+      <a class="btn secondary small" href="/export/{{ export_dataset }}?app_id={{ selected_app_id }}&amp;from={{ from_date }}&amp;to={{ to_date }}">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m0 0 3-3m-3 3-3-3M4 14v3h12v-3"/></svg>
+        Export CSV
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+{% if error %}
+  {% include "partials/error.html" %}
+{% elif not apps %}
+  <div class="card">
+    {% with title = "No apps yet",
+            hint = "Register an app under Apps & SDK, then its logs appear here as traffic arrives." %}
+      {% include "partials/empty.html" %}
+    {% endwith %}
+  </div>
+{% else %}
+  <div class="card flush logbook">
+  <div class="tabs logbook-tabs" role="tablist">
+    {% for tab in tabs %}
+      <a href="{{ tab.href }}" class="{% if tab.on %}on{% endif %}" role="tab" aria-selected="{{ 'true' if tab.on else 'false' }}">{{ tab.label }}</a>
+    {% endfor %}
+  </div>
+
+  <form class="toolbar logbook-filters" method="get">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="app_id" value="{{ selected_app_id }}">
+    <div class="field"><label for="from">From</label><input id="from" name="from" type="date" value="{{ from_date }}"></div>
+    <div class="field"><label for="to">To</label><input id="to" name="to" type="date" value="{{ to_date }}"></div>
+    {% if kind == "events" %}
+      <div class="field"><label for="event_name">Event</label><input id="event_name" name="event_name" value="{{ filters.event_name }}" placeholder="purchase" size="14"></div>
+      <div class="field"><label for="platform">Platform</label>
+        <select id="platform" name="platform">
+          <option value="">any</option>
+          {% for p in ("android", "ios", "web", "server") %}<option value="{{ p }}" {% if filters.platform == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="anonymous_id">Device</label><input id="anonymous_id" name="anonymous_id" value="{{ filters.anonymous_id }}" placeholder="anonymous id" size="16"></div>
+      <div class="field"><label for="user_id">User</label><input id="user_id" name="user_id" value="{{ filters.user_id }}" placeholder="user id" size="12"></div>
+    {% elif kind == "clicks" %}
+      <div class="field"><label for="platform">Platform</label>
+        <select id="platform" name="platform">
+          <option value="">any</option>
+          {% for p in ("android", "ios", "web") %}<option value="{{ p }}" {% if filters.platform == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="country">Country</label><input id="country" name="country" value="{{ filters.country }}" placeholder="IN" size="4" maxlength="2"></div>
+    {% else %}
+      <div class="field"><label for="method">Method</label>
+        <select id="method" name="method">
+          <option value="">any</option>
+          {% for m in ("referrer", "click_id", "device_match", "organic") %}<option value="{{ m }}" {% if filters.method == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="verdict">Verdict</label>
+        <select id="verdict" name="verdict">
+          <option value="">any</option>
+          {% for v in ("clean", "suspicious", "fraudulent") %}<option value="{{ v }}" {% if filters.verdict == v %}selected{% endif %}>{{ v }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="anonymous_id">Device</label><input id="anonymous_id" name="anonymous_id" value="{{ filters.anonymous_id }}" placeholder="anonymous id" size="16"></div>
+    {% endif %}
+    <button type="submit">Apply</button>
+    <a class="btn ghost" href="/logs?kind={{ kind }}&amp;app_id={{ selected_app_id }}">Reset</a>
+  </form>
+
+  {% if filters.values() | select | list %}
+    <div class="applied">
+      <span>Filtered by</span>
+      {% for name, value in filters.items() %}{% if value %}<span class="pill plain">{{ name }} = {{ value }}</span>{% endif %}{% endfor %}
+      <a href="/logs?kind={{ kind }}&amp;app_id={{ selected_app_id }}&amp;from={{ from_date }}&amp;to={{ to_date }}">Clear filters</a>
+    </div>
+  {% endif %}
+
+  {% if not items %}
+    <div class="table-wrap flat">
+      {% with title = "Nothing matches",
+              hint = "Widen the dates or clear a filter. Rows appear here once the worker has written them, a few seconds after they arrive." %}
+        {% include "partials/empty.html" %}
+      {% endwith %}
+    </div>
+  {% else %}
+    <div class="table-wrap flat">
+      <table class="log-table">
+        {% if kind == "events" %}
+          <thead><tr><th>Received</th><th>Event</th><th>Device</th><th>User</th><th>Platform</th><th>Version</th><th class="num">Revenue</th><th>Properties</th></tr></thead>
+          <tbody>
+            {% for row in items %}
+              <tr>
+                <td class="mono muted">{{ row.received_at[:19].replace("T", " ") }}</td>
+                <td><code>{{ row.event_name }}</code></td>
+                <td class="mono">{{ row.anonymous_id }}</td>
+                <td class="mono muted">{{ row.user_id or "—" }}</td>
+                <td class="muted">{{ row.platform }}{% if row.country %} · {{ row.country }}{% endif %}</td>
+                <td class="muted">{{ row.app_version or "—" }}</td>
+                <td class="num">{{ row.revenue_display }}</td>
+                <td class="props">{% if row.properties %}<details class="ev-more"><summary>{{ row.properties | length }} propert{{ "y" if row.properties | length == 1 else "ies" }}</summary><pre class="code">{{ row.properties_json }}</pre></details>{% else %}<span class="faint">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        {% elif kind == "clicks" %}
+          <thead><tr><th>Clicked</th><th>Link</th><th>Campaign</th><th>Platform</th><th>Country</th><th>Device</th><th>Partner params</th><th>Bot</th></tr></thead>
+          <tbody>
+            {% for row in items %}
+              <tr>
+                <td class="mono muted">{{ row.clicked_at[:19].replace("T", " ") }}</td>
+                <td>{{ row.link or "—" }}<div class="meta" style="margin-top:2px"><code>{{ row.tracking_code }}</code></div></td>
+                <td>{{ row.campaign or "—" }}</td>
+                <td class="muted">{{ row.platform }}</td>
+                <td class="muted">{{ row.country or "—" }}</td>
+                <td class="muted">{{ row.device_model or "—" }}{% if row.os_version %} · {{ row.os_version }}{% endif %}</td>
+                <td class="mono muted">{% if row.sub1 or row.sub2 or row.sub3 %}{{ [row.sub1, row.sub2, row.sub3] | select | join(" · ") }}{% else %}—{% endif %}</td>
+                <td>{% if row.is_bot %}<span class="pill bad">bot</span>{% else %}<span class="faint">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        {% else %}
+          <thead><tr><th>Attributed</th><th>Device</th><th>Method</th><th>Campaign</th><th>Link</th><th>Verdict</th><th>Partner params</th></tr></thead>
+          <tbody>
+            {% for row in items %}
+              <tr>
+                <td class="mono muted">{{ row.attributed_at[:19].replace("T", " ") }}{% if row.superseded %} <span class="pill plain">superseded</span>{% endif %}</td>
+                <td class="mono">{{ row.anonymous_id }}</td>
+                <td><span class="pill {{ row.method }}">{{ row.method }}</span></td>
+                <td>{{ row.campaign or "—" }}</td>
+                <td class="muted">{{ row.link or "—" }}</td>
+                <td><span class="pill {{ verdict_class(row.fraud_verdict) }}">{{ row.fraud_verdict or "—" }}</span>{% if row.fraud_rules %}<div class="meta">{{ row.fraud_rules | join(", ") }}</div>{% endif %}</td>
+                <td class="mono muted">{% if row.sub1 or row.sub2 or row.sub3 %}{{ [row.sub1, row.sub2, row.sub3] | select | join(" · ") }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        {% endif %}
+      </table>
+      <div class="table-foot">
+        <span>{{ items | length }} rows on this page{% if cursor %} · continued{% endif %}</span>
+        <div class="pager">
+          {% if cursor %}<a class="btn secondary small" href="{{ first_href }}">First page</a>{% endif %}
+          {% if next_href %}<a class="btn secondary small" href="{{ next_href }}">Next page ›</a>{% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+  </div>
+  <p class="meta">Up to 31 days per query. Pages are keyed on time and id, so a page costs the same whether it is the first or the thousandth. Device and IP hashes are never shown.</p>
+{% endif %}
+{% endblock %}

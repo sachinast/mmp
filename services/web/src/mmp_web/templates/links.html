@@ -1,16 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Tracking links · MMP{% endblock %}
 {% block content %}
-<h1>Tracking links</h1>
-<p class="sub">The URLs you give to networks. Each click through one is recorded and attributable.</p>
+{# Names for the ids the links carry, built here from what the page already
+   fetched rather than asked for again. #}
+{% set campaign_names = {} %}
+{% for campaign in campaigns %}{% set _ = campaign_names.update({campaign.id: campaign.name}) %}{% endfor %}
+{% set app_names = {} %}
+{% for app in apps %}{% set _ = app_names.update({app.id: app.name}) %}{% endfor %}
+
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Tracking links</span></nav>
+    <h1>Tracking links</h1>
+    <p class="sub">The URLs you give to networks. Every click through one is recorded and attributable.</p>
+  </div>
+  <div class="actions muted" style="font-size:12.5px">
+    {% if current_app %}<span class="pill plain">{{ current_app.name }}</span>{% endif %}
+    <span>{{ links | length }} link{{ "" if links | length == 1 else "s" }} · {{ campaigns | length }} campaign{{ "" if campaigns | length == 1 else "s" }}</span>
+  </div>
+</div>
 
 {% if error %}
   {% include "partials/error.html" %}
 {% endif %}
 {% if notice %}
-  <div class="error" style="border-left-color: var(--good)">
-    <strong style="color: var(--good)">{{ notice }}</strong>
-  </div>
+  <div class="notice"><strong>{{ notice }}</strong></div>
 {% endif %}
 
 {% if not apps %}
@@ -21,122 +35,132 @@
     {% endwith %}
   </div>
 {% else %}
-  <div class="grid cols-2" style="margin-bottom:18px">
-    <div class="card">
-      <h2 style="margin-top:0">Add a campaign</h2>
-      <form method="post" action="/campaigns">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="inline">
-          <div>
-            <label for="campaign_app">App</label>
-            <select id="campaign_app" name="app_id">
-              {% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}
-            </select>
-          </div>
-          <div>
-            <label for="campaign_name">Name</label>
-            <input id="campaign_name" name="name" required placeholder="Summer Sale">
-          </div>
-          <div>
-            <label for="source">Source</label>
-            <input id="source" name="source" size="12" placeholder="network_a">
-          </div>
-          <div>
-            <label for="medium">Medium</label>
-            <input id="medium" name="medium" size="8" placeholder="cpi">
-          </div>
-          <button type="submit">Create</button>
+  <div class="split hero">
+    <div class="card flush">
+      <div class="card-head">
+        <div>
+          <h2>Links</h2>
+          <div class="hint">Hand the partner form to a network: their click id in <code>sub1</code> comes back to them on the postback.</div>
         </div>
-      </form>
-      <p class="meta">
-        Source and medium are how this campaign appears in reports. They are
-        yours to choose; nothing here interprets them.
-      </p>
+      </div>
+      {% if not links %}
+        {% with title = "No tracking links yet",
+                hint = "Create a campaign and a link on the right, then hand the URL to your ad network." %}
+          {% include "partials/empty.html" %}
+        {% endwith %}
+      {% else %}
+        <div class="table-wrap flat">
+          <table class="links-table">
+            <thead>
+              <tr><th>Link</th><th>Campaign</th><th>URL</th><th>Destinations</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {% for link in links %}
+                <tr>
+                  <td>
+                    <strong>{{ link.name }}</strong>
+                    <div class="meta" style="margin-top:1px">{{ app_names.get(link.app_id, "") }}</div>
+                  </td>
+                  <td class="muted">{{ campaign_names.get(link.campaign_id, "—") }}</td>
+                  {# Shown in full, because the whole point of this page is copying it
+                     somewhere else. #}
+                  <td class="url-cell">
+                    <div class="url-row">
+                      <code id="link-{{ loop.index }}">{{ tracking_domain }}/c/{{ link.tracking_code }}</code>
+                      <button type="button" class="ghost small" data-copy="#link-{{ loop.index }}">Copy</button>
+                    </div>
+                    {# The form a partner actually needs: their own click id in sub1, so
+                       it comes back to them on the postback. #}
+                    <details class="ev-more">
+                      <summary>Partner form</summary>
+                      <div class="url-row" style="margin-top:6px">
+                        <code id="partner-{{ loop.index }}">{{ tracking_domain }}/c/{{ link.tracking_code }}?sub1=CLICK_ID&amp;sub2=PUBLISHER_ID</code>
+                        <button type="button" class="ghost small" data-copy="#partner-{{ loop.index }}">Copy</button>
+                      </div>
+                      {% if link.deep_link_path %}<div class="meta">Deep link: <code>{{ link.deep_link_path }}</code></div>{% endif %}
+                    </details>
+                  </td>
+                  <td>
+                    <div class="dest-pills">
+                      {% if link.android_url %}<span class="pill plain" title="{{ link.android_url }}">Android</span>{% endif %}
+                      {% if link.ios_url %}<span class="pill plain" title="{{ link.ios_url }}">iOS</span>{% endif %}
+                      <span class="pill plain" title="{{ link.fallback_url }}">Fallback</span>
+                    </div>
+                  </td>
+                  <td><span class="pill {{ link.status }}">{{ link.status }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
     </div>
 
-    <div class="card">
-      <h2 style="margin-top:0">Add a tracking link</h2>
-      {% if not campaigns %}
-        <p class="meta">Create a campaign first — a link belongs to one.</p>
-      {% else %}
-        <form method="post" action="/links">
+    <div class="stack">
+      <div class="card config">
+        <div class="config-head">
+          <h2>Add a campaign</h2>
+          <p class="hint">Source and medium are how it appears in reports. They are yours to choose; nothing here interprets them.</p>
+        </div>
+        <form method="post" action="/campaigns" class="stack" style="gap:12px">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <div class="inline">
-            <div>
+          <div class="field">
+            <label for="campaign_app">App</label>
+            <select id="campaign_app" name="app_id" style="width:100%">
+              {% for app in apps %}<option value="{{ app.id }}" {% if current_app and app.id == current_app.id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="campaign_name">Name</label>
+            <input id="campaign_name" name="name" required placeholder="Summer Sale" style="width:100%">
+          </div>
+          <div class="toolbar">
+            <div class="field grow"><label for="source">Source</label><input id="source" name="source" placeholder="network_a" style="width:100%"></div>
+            <div class="field grow"><label for="medium">Medium</label><input id="medium" name="medium" placeholder="cpi" style="width:100%"></div>
+          </div>
+          <button type="submit" style="width:100%">Create campaign</button>
+        </form>
+      </div>
+
+      <div class="card config">
+        <div class="config-head">
+          <h2>Add a tracking link</h2>
+          <p class="hint">The fallback is where someone lands on a platform you have no store URL for — a desktop browser, most often. It is the one field that is required.</p>
+        </div>
+        {% if not campaigns %}
+          <p class="hint">Create a campaign first — a link belongs to one.</p>
+        {% else %}
+          <form method="post" action="/links" class="stack" style="gap:12px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="field">
               <label for="campaign_id">Campaign</label>
-              <select id="campaign_id" name="campaign_id">
+              <select style="width:100%" id="campaign_id" name="campaign_id">
                 {% for campaign in campaigns %}
-                  <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                  <option value="{{ campaign.id }}">{{ campaign.name }}{% if app_names.get(campaign.app_id) %} · {{ app_names.get(campaign.app_id) }}{% endif %}</option>
                 {% endfor %}
               </select>
             </div>
-            <div>
+            <div class="field">
               <label for="link_name">Name</label>
-              <input id="link_name" name="name" required size="14" placeholder="summer-android">
+              <input id="link_name" name="name" required placeholder="summer-android" style="width:100%">
             </div>
-            <div>
+            <div class="field">
               <label for="fallback_url">Fallback URL</label>
-              <input id="fallback_url" name="fallback_url" required size="24"
-                     placeholder="https://acme.example">
+              <input id="fallback_url" name="fallback_url" required placeholder="https://acme.example" class="mono-input" style="width:100%">
             </div>
-            <div>
-              <label for="android_url">Android store URL</label>
-              <input id="android_url" name="android_url" size="24"
-                     placeholder="https://play.google.com/...">
+            <div class="field">
+              <label for="android_url">Android store URL <span class="faint">(optional)</span></label>
+              <input id="android_url" name="android_url" placeholder="https://play.google.com/store/apps/details?id=…" class="mono-input" style="width:100%">
             </div>
-            <div>
-              <label for="ios_url">iOS store URL</label>
-              <input id="ios_url" name="ios_url" size="24" placeholder="https://apps.apple.com/...">
+            <div class="field">
+              <label for="ios_url">iOS store URL <span class="faint">(optional)</span></label>
+              <input id="ios_url" name="ios_url" placeholder="https://apps.apple.com/app/…" class="mono-input" style="width:100%">
             </div>
-            <button type="submit">Create</button>
-          </div>
-        </form>
-        <p class="meta">
-          The fallback is where someone lands on a platform you have no store URL
-          for — a desktop browser, most often. It is the one field that is required.
-        </p>
-      {% endif %}
+            <button type="submit" style="width:100%">Create link</button>
+          </form>
+        {% endif %}
+      </div>
     </div>
-  </div>
-{% endif %}
-
-{% if not links %}
-  {% if apps %}
-    <div class="card">
-      {% with title = "No tracking links yet",
-              hint = "Create one above, then hand its URL to your ad network." %}
-        {% include "partials/empty.html" %}
-      {% endwith %}
-    </div>
-  {% endif %}
-{% else %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Name</th><th>Link</th><th>Destinations</th><th>Status</th></tr>
-      </thead>
-      <tbody>
-        {% for link in links %}
-          <tr>
-            <td>{{ link.name }}</td>
-            {# Shown in full, because the whole point of this page is copying it
-               somewhere else. #}
-            <td>
-              <code>{{ tracking_domain }}/c/{{ link.tracking_code }}</code>
-              {# The form a partner actually needs: their own click id in sub1, so
-                 it comes back to them on the postback. #}
-              <div class="meta">For a partner: <code>{{ tracking_domain }}/c/{{ link.tracking_code }}?sub1=CLICK_ID&amp;sub2=PUBLISHER_ID</code></div>
-            </td>
-            <td>
-              {% if link.android_url %}<div class="meta">Android</div>{% endif %}
-              {% if link.ios_url %}<div class="meta">iOS</div>{% endif %}
-              <div class="meta">Fallback</div>
-            </td>
-            <td><span class="pill {{ link.status }}">{{ link.status }}</span></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
 {% endif %}
 {% endblock %}

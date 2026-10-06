@@ -1,31 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Live events · MMP{% endblock %}
 {% block content %}
-<h1>Live events</h1>
-<p class="sub">
-  Everything reaching this app in the last fifteen minutes, as it lands. Send a
-  test event from a device and watch for it here — or for the reason it was
-  refused.
-</p>
-
-<form class="inline card" method="get" style="margin-bottom:14px">
+<div class="page-head">
   <div>
-    <label for="app_id">App</label>
-    <select id="app_id" name="app_id">
-      {% for app in apps %}
-        <option value="{{ app.id }}" {% if app.id == selected_app_id %}selected{% endif %}>{{ app.name }}</option>
-      {% endfor %}
-    </select>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Live events</span></nav>
+    <h1>Live events</h1>
+    <p class="sub">Watch clicks, installs, events and postbacks arrive as they land — or see the reason one was refused.</p>
   </div>
-  <button type="submit" class="secondary">Switch</button>
-</form>
+  {% if current_app %}
+    <div class="actions muted" style="font-size:12.5px">
+      <span class="pill plain">{{ current_app.name }}</span>
+      <span>last 15 minutes</span>
+    </div>
+  {% endif %}
+</div>
 
 {% if error %}
   {% include "partials/error.html" %}
 {% elif not selected_app_id %}
   <div class="card">
     {% with title = "No apps yet",
-            hint = "Create an app, put its key in the SDK, and events will appear here as they arrive." %}
+            hint = "Create an app under Apps & SDK, put its key in the SDK, and events will appear here as they arrive." %}
       {% include "partials/empty.html" %}
     {% endwith %}
   </div>
@@ -41,46 +36,85 @@
       </div>
     </noscript>
 
-    <div class="card live-toolbar">
-      <span id="live-status" class="live-status" data-state="connecting">Connecting…</span>
-      <div class="live-filters" role="group" aria-label="Show">
-        <button type="button" class="chip" data-kind="click" aria-pressed="true">Clicks <span data-count="click">0</span></button>
-        <button type="button" class="chip" data-kind="install" aria-pressed="true">Installs <span data-count="install">0</span></button>
-        <button type="button" class="chip" data-kind="event" aria-pressed="true">Events <span data-count="event">0</span></button>
-        <button type="button" class="chip" data-kind="postback" aria-pressed="true">Postbacks <span data-count="postback">0</span></button>
-        <button type="button" class="chip" data-kind="rejected" aria-pressed="true">Rejected <span data-count="rejected">0</span></button>
+    <div class="card flush stream">
+      <div class="card-head stream-head">
+        <div class="stream-title">
+          <span id="live-status" class="live-status" data-state="connecting">Connecting…</span>
+          <h2>Event stream</h2>
+        </div>
+        <div class="live-toolbar">
+          <div class="live-filters" role="group" aria-label="Show">
+            <button type="button" class="chip kind-click" data-kind="click" aria-pressed="true">Clicks <span data-count="click">0</span></button>
+            <button type="button" class="chip kind-install" data-kind="install" aria-pressed="true">Installs <span data-count="install">0</span></button>
+            <button type="button" class="chip kind-event" data-kind="event" aria-pressed="true">Events <span data-count="event">0</span></button>
+            <button type="button" class="chip kind-postback" data-kind="postback" aria-pressed="true">Postbacks <span data-count="postback">0</span></button>
+            <button type="button" class="chip kind-rejected" data-kind="rejected" aria-pressed="true">Rejected <span data-count="rejected">0</span></button>
+          </div>
+          <label class="search-field">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.5 13.5 3 3"/></svg>
+            <input id="live-search" type="search" placeholder="Filter by event, device or user id" aria-label="Filter">
+          </label>
+          <div class="row-actions">
+            <button type="button" id="live-pause" class="secondary small">Pause</button>
+            <button type="button" id="live-clear" class="ghost small">Clear</button>
+          </div>
+        </div>
       </div>
-      <input id="live-search" type="search" placeholder="Filter by name or device id" aria-label="Filter">
-      <button type="button" id="live-pause" class="secondary">Pause</button>
-      <button type="button" id="live-clear" class="secondary">Clear</button>
-    </div>
+      {# Filled by live.js with one chip per event name seen, so a noisy heartbeat
+         can be switched off while watching for the one that matters. #}
+      <div class="stream-names" hidden id="live-names-wrap">
+        <span class="muted">Event names</span>
+        <div id="live-names" class="live-filters live-names" role="group" aria-label="Event names" hidden></div>
+      </div>
 
-    <div class="table-wrap">
-      <table class="live-table">
-        <thead>
-          <tr><th>Time</th><th>Kind</th><th>Name</th><th>Device</th><th>Detail</th></tr>
-        </thead>
-        <tbody id="live-rows"></tbody>
-      </table>
-      <div id="live-empty" class="empty">
-        <strong>Waiting for activity</strong>
-        Nothing in the last fifteen minutes yet. Send a test event and it will appear
-        here within a few seconds:
-        <pre class="live-snippet">curl -X POST {{ tracking_domain }}/v1/events \
+      <div class="table-wrap flat">
+        <table class="live-table">
+          <thead>
+            <tr><th>Time</th><th>Kind</th><th>Name</th><th>Device</th><th>Detail</th></tr>
+          </thead>
+          <tbody id="live-rows"></tbody>
+        </table>
+        <div id="live-empty" class="empty waiting-state">
+          <div class="ill" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h3l2-5 3 10 2-5h4"/></svg>
+          </div>
+          <strong><span class="waiting"><i></i>Waiting for the first event</span></strong>
+          Nothing in the last fifteen minutes yet. Launch the app with the SDK, or send one by hand —
+          it appears here within a few seconds:
+          <pre class="live-snippet">curl -X POST {{ tracking_domain }}/v1/events \
   -H "authorization: Bearer YOUR_SDK_KEY" \
   -H "content-type: application/json" \
   -d '{"events":[{"event_name":"test_event","anonymous_id":"test-device"}]}'</pre>
+          <p class="meta">Need a key? Issue one under <a href="/apps?app_id={{ selected_app_id }}">Apps &amp; SDK</a>.</p>
+        </div>
+      </div>
+      <div class="table-foot">
+        <span id="live-last"></span>
+        <span>Shows what was <em>stored</em>, not merely received. Rejected requests are kept for an hour. Click a row for details.</span>
       </div>
     </div>
 
     <p class="meta">
-      Shows what was <em>stored</em>, not merely received: an event here has been
-      validated, queued and written, which is the whole pipeline. Rejected requests
-      are kept for an hour. Click a row for its details. Device and IP hashes are
-      never shown, and postback URLs are reduced to their host because partner
-      tokens often live in the query string.
+      Device and IP hashes are never shown, and postback URLs are reduced to their host because
+      partner tokens often live in the query string.
     </p>
   </section>
+
+  <div class="scrim"></div>
+  <aside class="drawer" aria-hidden="true" aria-label="Event details">
+    <div class="drawer-head">
+      <div class="ev-name"><span id="drawer-kind" class="live-kind"></span><h2 id="drawer-title"></h2></div>
+      <button type="button" class="ghost small" data-drawer-close aria-label="Close">Close</button>
+    </div>
+    <div class="drawer-body">
+      <dl id="drawer-facts" class="kv"></dl>
+      <h3 style="margin-top:18px">Raw</h3>
+      <div class="code-block">
+        <pre id="drawer-json" class="code"></pre>
+        <button type="button" class="secondary copy" data-copy="#drawer-json">Copy</button>
+      </div>
+    </div>
+  </aside>
   <script src="/static/live.js" defer></script>
 {% endif %}
 {% endblock %}

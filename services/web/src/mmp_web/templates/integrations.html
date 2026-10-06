@@ -1,129 +1,142 @@
 {% extends "base.html" %}
 {% block title %}Integrations · MMP{% endblock %}
 {% block content %}
-<h1>Integrations</h1>
-<p class="sub">
-  The networks you send conversions to. Credentials are encrypted at rest and
-  never returned — only the names of the fields you supplied.
-</p>
+<div class="page-head">
+  <div>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span>›</span><span>Integrations</span></nav>
+    <h1>Integrations</h1>
+    <p class="sub">The networks you send conversions to. Credentials are encrypted at rest and never returned — only the names of the fields you supplied.</p>
+  </div>
+  <div class="actions muted" style="font-size:12.5px">
+    <span>{{ integrations | length }} configured · {{ providers | length }} adapter{{ "" if providers | length == 1 else "s" }}</span>
+  </div>
+</div>
 
 {% if error %}
   {% include "partials/error.html" %}
 {% else %}
   {% if notice %}
-    <div class="error" style="border-left-color: var(--good)">
-      <strong style="color: var(--good)">{{ notice }}</strong>
-    </div>
+    <div class="notice"><strong>{{ notice }}</strong></div>
   {% endif %}
 
-  {# One form per adapter, built from what that adapter says it needs. Nothing
-     here knows the name of a single field: add an adapter and its form appears.
-     #}
-  <h2>Connect a network</h2>
-  <div class="grid cols-2" style="margin-bottom:18px">
-    {% for provider in providers %}
-      <div class="card">
-        <h2 style="margin-top:0">{{ provider.display_name }}</h2>
-        <p class="meta" style="margin-bottom:12px">
-          <code>{{ provider.name }}</code> · auth {{ provider.auth_style }}
-        </p>
-        <form method="post" action="/integrations">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="provider" value="{{ provider.name }}">
+  <div class="split hero">
+    <div class="stack">
+      <div class="card flush">
+        <div class="card-head">
           <div>
-            <label for="name-{{ provider.name }}">Name</label>
-            <input id="name-{{ provider.name }}" name="name" required
-                   placeholder="Network A (production)" style="width:100%">
+            <h2>Configured</h2>
+            <div class="hint">An integration tells a postback rule how to talk to a network: which adapter, what credentials, what settings.</div>
           </div>
-          {% for field in provider.fields %}
-            <div style="margin-top:10px">
-              <label for="{{ provider.name }}-{{ field.name }}">
-                {{ field.label }}{% if not field.required %} <span class="pill">optional</span>{% endif %}
-              </label>
-              {# type=password for a secret: it keeps the value out of the
-                 screen, out of a screenshot, and out of the browser's ordinary
-                 form history. It is not encryption — that happens server-side —
-                 but showing a token in plain text on a shared screen is a way
-                 to lose one. #}
-              <input id="{{ provider.name }}-{{ field.name }}"
-                     name="field_{{ field.name }}"
-                     type="{% if field.secret %}password{% else %}text{% endif %}"
-                     {% if field.secret %}autocomplete="off" spellcheck="false"{% endif %}
-                     {% if field.required %}required{% endif %}
-                     style="width:100%">
-              {% if field.hint %}<p class="meta">{{ field.hint }}</p>{% endif %}
-            </div>
-          {% endfor %}
-          <button type="submit" style="margin-top:12px">Connect</button>
-        </form>
-      </div>
-    {% endfor %}
-  </div>
-
-  <h2>Configured</h2>
-  {% if not integrations %}
-    <div class="card">
-      {% with title = "No integrations configured",
-              hint = "An integration tells a postback rule how to talk to a network: which adapter, what credentials, what settings." %}
-        {% include "partials/empty.html" %}
-      {% endwith %}
-    </div>
-  {% else %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>Name</th><th>Adapter</th><th>Credentials</th><th>Status</th><th>Added</th></tr>
-        </thead>
-        <tbody>
-          {% for integration in integrations %}
-            <tr>
-              <td>{{ integration.name }}</td>
-              <td><code>{{ integration.provider }}</code></td>
-              {# Names only, never values. A credential you can read back from a
-                 dashboard is one an attacker can read back too. #}
-              <td>
-                {% for name in integration.credential_names %}<span class="pill">{{ name }}</span> {% endfor %}
-                {% if not integration.credential_names %}<span class="meta">stored, not shown</span>{% endif %}
-              </td>
-              <td><span class="pill {{ integration.status }}">{{ integration.status }}</span></td>
-              <td class="meta">{{ integration.created_at[:10] }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-
-  <h2>Available adapters</h2>
-  <p class="sub">
-    What each adapter can carry. A rule that needs a capability its adapter does
-    not have is refused when you save it, not discovered as a delivery that
-    never arrives.
-  </p>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Adapter</th><th>Auth</th><th>Capabilities</th><th>Event names it sends</th></tr>
-      </thead>
-      <tbody>
-        {% for provider in providers %}
-          <tr>
-            <td><code>{{ provider.name }}</code><div class="meta">{{ provider.display_name }}</div></td>
-            <td class="meta">{{ provider.auth_style }}</td>
-            <td>{% for capability in provider.capabilities %}<span class="pill">{{ capability }}</span> {% endfor %}</td>
-            <td>
-              {% if provider.event_map %}
-                {% for ours, theirs in provider.event_map.items() %}
-                  <div class="meta"><code>{{ ours }}</code> → <code>{{ theirs }}</code></div>
+        </div>
+        {% if not integrations %}
+          {% with title = "No integrations configured",
+                  hint = "Connect a network on the right. Only the names of credential fields are ever shown again." %}
+            {% include "partials/empty.html" %}
+          {% endwith %}
+        {% else %}
+          <div class="table-wrap flat">
+            <table class="int-table">
+              <thead>
+                <tr><th>Name</th><th>Adapter</th><th>Credentials</th><th>Status</th><th>Added</th></tr>
+              </thead>
+              <tbody>
+                {% for integration in integrations %}
+                  <tr>
+                    <td><strong>{{ integration.name }}</strong></td>
+                    <td><code class="ev-code">{{ integration.provider }}</code></td>
+                    {# Names only, never values. A credential you can read back from a
+                       dashboard is one an attacker can read back too. #}
+                    <td>
+                      <div class="rule-pills">
+                        {% for name in integration.credential_names %}<span class="pill plain">{{ name }}</span>{% endfor %}
+                        {% if not integration.credential_names %}<span class="faint">stored, not shown</span>{% endif %}
+                      </div>
+                    </td>
+                    <td><span class="pill {{ integration.status }}">{{ integration.status }}</span></td>
+                    <td class="mono muted">{{ integration.created_at[:10] }}</td>
+                  </tr>
                 {% endfor %}
-              {% else %}
-                <span class="meta">sent unchanged</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <h2>Available adapters</h2>
+            <div class="hint">What each adapter can carry. A rule that needs a capability its adapter does not have is refused when you save it, not discovered as a delivery that never arrives.</div>
+          </div>
+        </div>
+        <div class="table-wrap flat">
+          <table class="int-table">
+            <thead>
+              <tr><th>Adapter</th><th>Auth</th><th>Capabilities</th><th>Event names it sends</th></tr>
+            </thead>
+            <tbody>
+              {% for provider in providers %}
+                <tr>
+                  <td><strong>{{ provider.display_name }}</strong><div><code class="ev-code">{{ provider.name }}</code></div></td>
+                  <td class="muted">{{ provider.auth_style }}</td>
+                  <td><div class="rule-pills">{% for capability in provider.capabilities %}<span class="pill plain">{{ capability }}</span>{% endfor %}</div></td>
+                  <td>
+                    {% if provider.event_map %}
+                      {% for ours, theirs in provider.event_map.items() %}
+                        <div class="meta" style="margin:0"><code>{{ ours }}</code> → <code>{{ theirs }}</code></div>
+                      {% endfor %}
+                    {% else %}
+                      <span class="faint">sent unchanged</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {# One form per adapter, built from what that adapter says it needs. Nothing
+       here knows the name of a single field: add an adapter and its form appears. #}
+    <div class="stack">
+      {% for provider in providers %}
+        <div class="card config">
+          <div class="config-head">
+            <h2>Connect {{ provider.display_name }}</h2>
+            <p class="hint"><code>{{ provider.name }}</code> · auth {{ provider.auth_style }}</p>
+          </div>
+          <form method="post" action="/integrations" class="stack" style="gap:12px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="provider" value="{{ provider.name }}">
+            <div class="field">
+              <label for="name-{{ provider.name }}">Name</label>
+              <input id="name-{{ provider.name }}" name="name" required placeholder="Network A (production)" style="width:100%">
+            </div>
+            {% for field in provider.fields %}
+              <div class="field">
+                <label for="{{ provider.name }}-{{ field.name }}">
+                  {{ field.label }}{% if not field.required %} <span class="faint">(optional)</span>{% endif %}
+                </label>
+                {# type=password for a secret: it keeps the value out of the
+                   screen, out of a screenshot, and out of the browser's ordinary
+                   form history. It is not encryption — that happens server-side —
+                   but showing a token in plain text on a shared screen is a way
+                   to lose one. #}
+                <input id="{{ provider.name }}-{{ field.name }}"
+                       name="field_{{ field.name }}"
+                       type="{% if field.secret %}password{% else %}text{% endif %}"
+                       {% if field.secret %}autocomplete="off" spellcheck="false"{% endif %}
+                       {% if field.required %}required{% endif %}
+                       class="mono-input" style="width:100%">
+                {% if field.hint %}<span class="hint">{{ field.hint }}</span>{% endif %}
+              </div>
+            {% endfor %}
+            <button type="submit" style="width:100%">Connect</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
   </div>
 {% endif %}
 {% endblock %}
