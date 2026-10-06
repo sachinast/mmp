@@ -1,0 +1,99 @@
+# Single-host deployment. Secrets come from .env.prod beside this file, which
+# deploy.sh generates on the server and which never enters the repository.
+#
+# Each service connects as its own least-privilege role, so RLS is enforced in
+# production exactly as the tests exercise it. Only the migrator uses the owner.
+
+x-app: &app
+  image: mmp-app:latest
+  restart: unless-stopped
+  env_file: .env.prod
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PG_SUPERUSER_PASSWORD}
+      POSTGRES_DB: postgres
+    command: [postgres, -c, max_connections=200, -c, shared_buffers=1GB, -c, work_mem=16MB]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *app
+    restart: "no"
+    profiles: ["tools"]
+    working_dir: /app/packages/mmp_db
+    environment:
+      MMP_DATABASE_URL: postgresql+asyncpg://mmp_owner:${PG_OWNER_PASSWORD}@postgres:5432/mmp
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: infra/deploy/Dockerfile
+    environment:
+      MMP_SERVICE_NAME: api
+      MMP_DATABASE_URL: postgresql+asyncpg://mmp_api:${PG_API_PASSWORD}@postgres:5432/mmp
+    command: [uvicorn, mmp_api.app:app, --host, 0.0.0.0, --port, "8002", --no-server-header]
+    ports: ["127.0.0.1:8002:8002"]
+
+  tracker:
+    <<: *app
+    environment:
+      MMP_SERVICE_NAME: tracker
+      # The tracker never touches KMS, so unlike the API and worker it can run
+      # in prod today.
+      MMP_ENVIRONMENT: prod
+      MMP_DATABASE_URL: postgresql+asyncpg://mmp_tracker:${PG_TRACKER_PASSWORD}@postgres:5432/mmp
+    # Scaled by process count, per the plan: the redirect path is almost no
+    # Python, so throughput follows the number of workers. 4 on this 4-core
+    # host, which it shares with Postgres and the other services.
+    command: [uvicorn, mmp_tracker.app:app, --host, 0.0.0.0, --port, "8001", --no-server-header,
+              --workers, "4"]
+    ports: ["127.0.0.1:8001:8001"]
+
+  web:
+    <<: *app
+    environment:
+      MMP_SERVICE_NAME: web
+      MMP_DATABASE_URL: postgresql+asyncpg://mmp_api:${PG_API_PASSWORD}@postgres:5432/mmp
+      MMP_API_BASE_URL: http://api:8002
+    command: [uvicorn, mmp_web.app:app, --host, 0.0.0.0, --port, "8003", --no-server-header]
+    ports: ["127.0.0.1:8003:8003"]
+    depends_on: [api]
+
+  worker:
+    <<: *app
+    # The consumer name derives from the hostname; a stable one keeps Redis
+    # pending entries attached across container recreation.
+    hostname: mmp-worker
+    environment:
+      MMP_SERVICE_NAME: worker
+      MMP_DATABASE_URL: postgresql+asyncpg://mmp_worker:${PG_WORKER_PASSWORD}@postgres:5432/mmp
+    command: [python, -m, mmp_worker.main]
+
+volumes:
+  pgdata:
+  redisdata:
